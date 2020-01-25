@@ -1,0 +1,26 @@
+{
+  vagrant: {
+    "natNetworkBase": "10.100",
+    "systemNetworkBase": "10.244.100"
+  },
+  nodes: {
+    "provisioner": {
+      vagrant: {
+        "boxName": "ubuntu",
+        "boxVersion": "18.04",
+        "hostname": "provisioner",
+        "startAddr": "10",
+        "machineCount": 1
+      }
+    },
+    "appliance": {
+      vagrant: {
+        "boxName": "ubuntu",
+        "boxVersion": "18.04",
+        "hostname": "appliance",
+        "startAddr": "20",
+        "machineCount": 1
+      }
+    }
+  }
+}

@@ -78,14 +78,10 @@ project-init:
 	fi &&\
 	if [[ ! -e ../../../Makefile ]]; then \
 	  echo "Initialising project with template files" &&\
-	  cp ../templates/init/* ../../..; \
+	  cp -R ../templates/init/* ../../..; \
 	else \
 	  echo "Project already initialised with template files"; \
 	fi &&\
-	for initDir in "vars" "defaults" "tasks" "group_vars" "environments/$(env_name)"; do \
-	  echo "Creating directory: $${initDir}" &&\
-	  mkdir -p ../../../$${initDir}; \
-	done
 
 vagrant-up:
 	$(quiet) \
