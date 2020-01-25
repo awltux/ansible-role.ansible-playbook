@@ -76,6 +76,7 @@ project-init:
 	  echo "The project-init target must be launched from within the role" &&\
 	  exit 1
 	fi &&\
+	# TODO: replace with for loop and copy only if it doesnt already exist \
 	if [[ ! -e ../../../Makefile ]]; then \
 	  echo "Initialising project with template files" &&\
 	  cp -R ../templates/init/* ../../..; \
