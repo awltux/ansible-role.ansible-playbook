@@ -76,8 +76,8 @@ project-init:
 	else \
 	  echo "Project already initialised with template files"; \
 	fi \
-	for initDir in vars defaults tasks group_vars environments/$(env_name); do \
-	  mkdir -p ../../../$${initDir}; \
+	for initDir in "vars" "defaults" "tasks" "group_vars" "environments/$(env_name)"; do \
+	  mkdir -p ../../../${initDir}; \
 	done
 
 vagrant-up:
