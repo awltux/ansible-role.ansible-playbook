@@ -35,11 +35,11 @@ Run this in a git BASH console to create a new ansible project:
     helperPlaybookName=ansible-role.ansible-playbook; \
     if [[ ! -e roles/${helperPlaybookName} ]]; then \
       git submodule add https://github.com/awltux/${helperPlaybookName}.git roles/${helperPlaybookName}; \
+    else \
+      git pull roles/${helperPlaybookName}; \
     fi &&\
     # Initialise the project with template files. \
-    cd roles/${helperPlaybookName}/scripts &&\
-    make project-init &&\
-    cd -; \
+    make -C roles/${helperPlaybookName}/scripts project-init &&\
   fi
 endef
 
@@ -58,18 +58,24 @@ validate-env-name:
 	$(quiet) \
 	if [[ "$(env_name)" == "" ]]; then \
 	  echo "Makefile parameter is empty: make env_name=vagrant target_name" &&\
-	  exit 1 \
+	  exit 1; \
 	else \
-	  if [[ ! -e environments/${env_name}/inventory.ini ]]; then
-	    echo "Makefile parameter env_name need to reference an inventoryfile: environments/${env_name}/inventory.ini"
-	    exit 1
-	  fi
+	  if [[ ! -e environments/${env_name}/inventory.ini ]]; then \
+	    echo "Makefile parameter env_name need to reference an inventoryfile: environments/${env_name}/inventory.ini" &&\
+	    exit 1; \
+	  fi \
 	fi
 
 # Setup the project uisng default config.
 .PHONY: project-init
 project-init:
 	$(quiet) \
+	parentDir=$( basename $(pwd) ) &&\
+	roleName=ansible-playbook.${playbook_name} &&\
+	if [[ ! "${roleName}" == "${parentDir}" ]]; then \
+	  echo "The project-init target must be launched from within the role" &&\
+	  exit 1
+	fi &&\
 	if [[ ! -e ../../../Makefile ]]; then \
 	  echo "Initialising project with template files" &&\
 	  cp ../templates/init/* ../../..; \
