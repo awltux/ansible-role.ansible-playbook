@@ -1,6 +1,8 @@
 
 
 debug ?= false
+env_name ?= vagrant
+profile ?=
 
 quiet := @
 ifneq ($(debug),false)
@@ -12,13 +14,33 @@ endif
 SHELL = bash
 
 define help_text
-Create a git project:
-  mkdir -p ansible-playbook.playbook_name/roles
-  cd ansible-playbook.playbook_name
-  git init
-  git submodule add https://github.com/awltux/ansible-role.ansible-playbook.git roles/ansible-role.ansible-playbook
-  cd roles/ansible-role.ansible-playbook
-  make project-init
+Run this in a git BASH console to create a new ansible project:
+  if [[ "" == "${playbook_name}" ]]; then
+    echo "Missing environment variable: playbook_name"
+  else
+    # Create the project directory
+    projectName=ansible-playbook.${playbook_name} &&\
+    parentDir=$( basename $(pwd) );
+    if [[ ! "${projectName}" == "${parentDir}" ]]; then
+      if [[ ! -e ${projectName}/roles ]]; then
+        mkdir -p ${projectName}/roles;
+      fi
+      cd ${projectName};
+    fi
+    # Initialise the git repo
+    if [[ ! -e .git ]]; then
+      git init;
+    fi
+    # Add the helper sub module
+    helperPlaybookName=ansible-role.ansible-playbook;
+    if [[ ! -e roles/${helperPlaybookName} ]]; then
+      git submodule add https://github.com/awltux/${helperPlaybookName}.git roles/${helperPlaybookName};
+    fi
+    # Initialise the project with template files.
+    cd roles/${helperPlaybookName}/scripts &&\
+    make project-init
+    cd -
+  fi
 endef
 
 .PHONY: help
@@ -32,7 +54,19 @@ list:
 	grep '^\([a-zA-Z0-9_-]\+\):.*' | \
 	sed 's/^\([a-zA-Z0-9_-]\+\):.*/   \1/'
 
-# Copy the template/init files to the root of the project.
+validate-env-name:
+	$(quiet) \
+	if [[ "$(env_name)" == "" ]]; then \
+	  echo "Makefile parameter is empty: make env_name=vagrant target_name" &&\
+	  exit 1 \
+	else \
+	  if [[ ! -e environments/${env_name}/inventory.ini ]]; then
+	    echo "Makefile parameter env_name need to reference an inventoryfile: environments/${env_name}/inventory.ini"
+	    exit 1
+	  fi
+	fi
+
+# Setup the project uisng default config.
 .PHONY: project-init
 project-init:
 	$(quiet) \
@@ -42,8 +76,9 @@ project-init:
 	else \
 	  echo "Project already initialised with template files"; \
 	fi \
-	for initDir in vars defaults tasks group_vars environments/vagrant 
-	if [[ ! -e ../../../var ]]; then \
+	for initDir in vars defaults tasks group_vars environments/$(env_name); do \
+	  mkdir -p ../../../$${initDir}; \
+	done
 
 vagrant-up:
 	$(quiet) \
@@ -62,3 +97,11 @@ ansible-deploy:
 molecule-test:
 	$(quiet) \
 	# Run molecule unit tests on provisioner using docker
+
+git-pull-origin-master:
+	$(quiet) \
+	git pull origin master
+	
+git-push-origin-master:
+	$(quiet) \
+	git push origin master
