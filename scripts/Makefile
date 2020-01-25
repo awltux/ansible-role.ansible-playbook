@@ -74,7 +74,7 @@ project-init:
 	roleName=ansible-playbook.${playbook_name} &&\
 	if [[ ! "${roleName}" == "${parentDir}" ]]; then \
 	  echo "The project-init target must be launched from within the role" &&\
-	  exit 1
+	  exit 1; \
 	fi &&\
 	# TODO: replace with for loop and copy only if it doesnt already exist \
 	if [[ ! -e ../../../Makefile ]]; then \
@@ -82,7 +82,7 @@ project-init:
 	  cp -R ../templates/init/* ../../..; \
 	else \
 	  echo "Project already initialised with template files"; \
-	fi &&\
+	fi
 
 vagrant-up:
 	$(quiet) \
