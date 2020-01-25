@@ -39,7 +39,7 @@ Run this in a git BASH console to create a new ansible project:
       git pull roles/${helperPlaybookName}; \
     fi &&\
     # Initialise the project with template files. \
-    make -C roles/${helperPlaybookName}/scripts project-init &&\
+    make -C roles/${helperPlaybookName}/scripts project-init; \
   fi
 endef
 
@@ -74,7 +74,7 @@ project-init:
 	roleName=ansible-playbook.${playbook_name} &&\
 	if [[ ! "${roleName}" == "${parentDir}" ]]; then \
 	  echo "The project-init target must be launched from within the role" &&\
-	  exit 1
+	  exit 1;
 	fi &&\
 	# TODO: replace with for loop and copy only if it doesnt already exist \
 	if [[ ! -e ../../../Makefile ]]; then \
