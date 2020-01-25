@@ -15,31 +15,31 @@ SHELL = bash
 
 define help_text
 Run this in a git BASH console to create a new ansible project:
-  if [[ "" == "${playbook_name}" ]]; then
-    echo "Missing environment variable: playbook_name"
-  else
-    # Create the project directory
+  if [[ "" == "${playbook_name}" ]]; then \
+    echo "Missing environment variable: playbook_name"; \
+  else \
+    # Create the project directory \
     projectName=ansible-playbook.${playbook_name} &&\
-    parentDir=$( basename $(pwd) );
-    if [[ ! "${projectName}" == "${parentDir}" ]]; then
-      if [[ ! -e ${projectName}/roles ]]; then
-        mkdir -p ${projectName}/roles;
-      fi
-      cd ${projectName};
-    fi
-    # Initialise the git repo
-    if [[ ! -e .git ]]; then
-      git init;
-    fi
-    # Add the helper sub module
-    helperPlaybookName=ansible-role.ansible-playbook;
-    if [[ ! -e roles/${helperPlaybookName} ]]; then
-      git submodule add https://github.com/awltux/${helperPlaybookName}.git roles/${helperPlaybookName};
-    fi
-    # Initialise the project with template files.
+    parentDir=$( basename $(pwd) ) &&\
+    if [[ ! "${projectName}" == "${parentDir}" ]]; then \
+      if [[ ! -e ${projectName}/roles ]]; then \
+        mkdir -p ${projectName}/roles; \
+      fi &&\
+      cd ${projectName}; \
+    fi &&\
+    # Initialise the git repo \
+    if [[ ! -e .git ]]; then \
+      git init; \
+    fi &&\
+    # Add the helper sub module \
+    helperPlaybookName=ansible-role.ansible-playbook; \
+    if [[ ! -e roles/${helperPlaybookName} ]]; then \
+      git submodule add https://github.com/awltux/${helperPlaybookName}.git roles/${helperPlaybookName}; \
+    fi &&\
+    # Initialise the project with template files. \
     cd roles/${helperPlaybookName}/scripts &&\
-    make project-init
-    cd -
+    make project-init &&\
+    cd -; \
   fi
 endef
 
@@ -75,7 +75,7 @@ project-init:
 	  cp ../templates/init/* ../../..; \
 	else \
 	  echo "Project already initialised with template files"; \
-	fi \
+	fi &&\
 	for initDir in "vars" "defaults" "tasks" "group_vars" "environments/$(env_name)"; do \
 	  mkdir -p ../../../${initDir}; \
 	done
