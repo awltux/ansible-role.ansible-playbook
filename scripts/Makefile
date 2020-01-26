@@ -1,5 +1,6 @@
 
 
+# Make parameters
 debug ?= false
 env_name ?= vagrant
 profile ?=
@@ -14,39 +15,16 @@ endif
 SHELL = bash
 
 define help_text
-Run this in a git BASH console to create a new ansible project:
-  if [[ "" == "${playbook_name}" ]]; then \
-    echo "Missing environment variable: playbook_name"; \
-  else \
-    # Create the project directory \
-    projectName=ansible-playbook.${playbook_name} &&\
-    parentDir=$( basename $(pwd) ) &&\
-    if [[ ! "${projectName}" == "${parentDir}" ]]; then \
-      if [[ ! -e ${projectName}/roles ]]; then \
-        mkdir -p ${projectName}/roles; \
-      fi &&\
-      cd ${projectName}; \
-    fi &&\
-    # Initialise the git repo \
-    if [[ ! -e .git ]]; then \
-      git init; \
-    fi &&\
-    # Add the helper sub module \
-    helperPlaybookName=ansible-role.ansible-playbook; \
-    if [[ ! -e roles/${helperPlaybookName} ]]; then \
-      git submodule add https://github.com/awltux/${helperPlaybookName}.git roles/${helperPlaybookName}; \
-    else \
-      git pull roles/${helperPlaybookName}; \
-    fi &&\
-    # Initialise the project with template files. \
-    make -C roles/${helperPlaybookName}/scripts project-init; \
-  fi
+= Creating an ansible playbook project
+Running 'scripts/project-init.sh' in a GIT BASH (MINGW64) console to create 
+a new ansible project.
 endef
 
 .PHONY: help
 help:
 	@: $(info $(help_text))
 
+# List the makefile targets
 .PHONY: list
 list:
 	$(quiet) \
@@ -54,34 +32,34 @@ list:
 	grep '^\([a-zA-Z0-9_-]\+\):.*' | \
 	sed 's/^\([a-zA-Z0-9_-]\+\):.*/   \1/'
 
+# Validate that the env_name property is defined and points to a valid environment file.
+.PHONY: validate-env-name
 validate-env-name:
 	$(quiet) \
 	if [[ "$(env_name)" == "" ]]; then \
-	  echo "Makefile parameter is empty: make env_name=vagrant target_name" &&\
+	  echo "Parameter 'env_name' is empty: make env_name=vagrant ..." &&\
 	  exit 1; \
 	else \
-	  if [[ ! -e environments/${env_name}/inventory.ini ]]; then \
-	    echo "Makefile parameter env_name need to reference an inventoryfile: environments/${env_name}/inventory.ini" &&\
+	  inventoryFile=environments/${env_name}/inventory.ini; \
+	  if [[ ! -e $${inventoryFile} ]]; then \
+	    echo "Parameter 'env_name' has no file: $${inventoryFile}" &&\
 	    exit 1; \
 	  fi \
 	fi
 
-# Setup the project uisng default config.
-.PHONY: project-init
-project-init:
+# Validate that the env_name property is defined and points to a valid environment file.
+.PHONY: validate-profile
+validate-profile:
 	$(quiet) \
-	parentDir=$( basename $(pwd) ) &&\
-	roleName=ansible-playbook.${playbook_name} &&\
-	if [[ ! "${roleName}" == "${parentDir}" ]]; then \
-	  echo "The project-init target must be launched from within the role" &&\
+	if [[ "$(profile)" == "" ]]; then \
+	  echo "Parameter 'profile' is empty: make profile=default ..." &&\
 	  exit 1; \
-	fi &&\
-	# TODO: replace with for loop and copy only if it doesnt already exist \
-	if [[ ! -e ../../../Makefile ]]; then \
-	  echo "Initialising project with template files" &&\
-	  cp -R ../templates/init/* ../../..; \
 	else \
-	  echo "Project already initialised with template files"; \
+	  profileFile=profiles/${profile}/main.yml; \
+	  if [[ ! -e $${profileFile} ]]; then \
+	    echo "Parameter 'profile' has no file: $${profileFile}" &&\
+	    exit 1; \
+	  fi \
 	fi
 
 vagrant-up:
