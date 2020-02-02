@@ -6,7 +6,7 @@ a new ansible project.
 endef
 
 # 2.8 has some useful windows tasks e.g. win_user_profile
-ANSIBLE_VERSION := 2.8.1
+ansible_version := 2.8.1
 
 # Make parameters
 debug ?= false
@@ -216,9 +216,10 @@ create-inventory: linux-bootstrap
 linux-bootstrap:
 	# FIXME: Need to add username=$(ldap_login) and password=$(ANSIBLE_PASSWORD_FILE) to /etc/yum.conf: [main] section
 	@( sudo yum install -y epel-release &&\
+	sudo yum -y update &&\
 	sudo yum install -y libselinux-python python3 python3-pip jq sshpass &&\
 	sudo su - root -c "pip3 install --upgrade pip" &&\
-	sudo su - root -c "pip3 install ansible==$(ANSIBLE_VERSION) dnspython requests pywinrm netaddr jmespath selinux" ) || exit 1
+	sudo su - root -c "pip3 install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" ) || exit 1
 
 # The provisioner provides Docker and GECK so ansible must be run native on linux.
 .PHONY: linux-provisioner
@@ -242,3 +243,30 @@ linux-appliance: linux-bootstrap
 	-e env_name='$(env_name)' \
 	appliance.playbook 2>&1 | tee $(log_dir)/$@.log || exit 1
 
+# LINUX ONLY: This command will only work on a Linux host i.e. provisioner
+# Passwords used by the scripts are stored in an encrypted vault file called vault/credentials.yml
+# If you dont know the devops password to this file, you will need to create a new one.
+# This target will try to extract all yml files under the vault directory and stores them 
+# in an unencrypted file target/credentials.yml. 
+# The file ansible.cfg declares the location of the vault password file e.g. 
+#    ${HOME}/.vault_password_file. 
+# If this password doesn't unlock the vault files, a template file will be copied to target/credentials.yml.
+# Once extracted, modify target/credentials.yml and then call "make vault-encrypt" to update the encrypted vault file.
+vault-decrypt:
+	$(HIDE_CMD)if ! ansible-vault view vault/*.yml > target/credentials.yml; then \
+	   echo "[TO FIX THIS] Modify target/credentials.yml then use 'make vault_encrypt'" && \
+		 cp scripts/ansible-playbook.common-scripts/credentials.yml target/credentials.yml; \
+	fi;
+
+# LINUX ONLY: This command will only work on a Linux host i.e. provisioner
+# Encrypts the contents of target/credentials.yml to replace vault/credentials.yml
+# The file ansible.cfg declares the location of the vault password file e.g. 
+#    ${HOME}/.vault_password_file. 
+vault-encrypt:
+	$(HIDE_CMD)if [[ ! -e $(VAGRANT_PASSWORD_FILE) ]]; then \
+	  echo "[ERROR] Missing file: $(VAGRANT_PASSWORD_FILE)" && \
+	  exit 1; \
+	fi && \
+	( cat $(VAGRANT_PASSWORD_FILE) | ansible-vault encrypt --output target/credentials-encrypted.yml target/credentials.yml ) && \
+	cp target/credentials-encrypted.yml vault/credentials.yml && \
+	rm -f target/credentials-encrypted.yml target/credentials.yml

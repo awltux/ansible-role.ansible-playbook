@@ -14,7 +14,7 @@ if ! net session  1>NUL 2>NUL; then
   exit 1
 fi
 
-parentDir=$( basename $(pwd) );
+parentDir="$( basename $(pwd) )";
 if [[ ! "${playbook_name}" == "${parentDir}" ]]; then
   if [[ ! -e ${playbook_name}/roles ]]; then
     echo "Create the project directory"
