@@ -13,6 +13,7 @@ debug ?= false
 env_name ?= vagrant
 profile ?=
 project_name ?=
+log_dir ?= target
 
 quiet := @
 ifneq ($(debug),false)
@@ -35,11 +36,11 @@ inventory_file ?= environments/$(env_name)/inventory.ini
 # If target/.vault_password_file is part if a mounted folder 
 # from windows it has a problematic executable bit set.
 ifeq ($(shell test -e ~/.vault_password_file && echo -n yes),yes)
-VAGRANT_PASSWORD_FILE := ~/.vault_password_file
+vault_password_file := ~/.vault_password_file
 else
-VAGRANT_PASSWORD_FILE = target/.vault_password_file
+vault_password_file = target/.vault_password_file
 endif
-$(info VAGRANT_PASSWORD_FILE=$(VAGRANT_PASSWORD_FILE))
+$(info vault_password_file=$(vault_password_file))
 
 # Use password files in home before target
 # If target/.vault_password_file is part if a mounted folder 
@@ -59,10 +60,12 @@ parse_env_details:
 # The jq app may not have been installed yet
 ifneq (, $(shell which jq))
 provisioner_hostname := $(shell jq '.provisionerHostname' $(cluster_details_file) | sed 's/\"//g' )
+prov_addr_start   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(cluster_details_file) | sed 's/\"//g' )
 local_login := $(shell jq '.localLogin' $(cluster_details_file) | sed 's/\"//g')
 # APPLIANCE CONFIG
 app_hostname_base := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .hostnameBase?' $(cluster_details_file) | sed 's/\"//g' )
-app_addr_start := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?' $(cluster_details_file) | sed 's/\"//g' )
+app_addr_start    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(cluster_details_file) | sed 's/\"//g' )
+app_node_count    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(cluster_details_file) | sed 's/\"//g' )
 endif
 
 # List the makefile targets
@@ -108,7 +111,7 @@ validate-profile:
 # On Windows install gnuwin32 version of make
 # http://gnuwin32.sourceforge.net/packages/make.htm
 .PHONY: vagrant-up
-vagrant-up: parse_env_details vagrant-ansible-passwords
+vagrant-up: parse_env_details
 	$(quiet)( \
 	if ! (vagrant plugin list | grep -q vagrant-vbguest); then \
 	  echo "#################################################" &&\
@@ -124,14 +127,18 @@ vagrant-up: parse_env_details vagrant-ansible-passwords
 
 # Run just the ansible provisioning on the jumpbox VM
 .PHONY: vagrant-reload
-vagrant-reload: parse_env_details vagrant-ansible-passwords
-	@( vagrant ssh -c \
-	"if [[ ! -e /etc/ansible/.bootstrapped ]]; then \
-		sudo -u $(local_login) bash -c 'ssh-keyscan $(app_hostname_base)-$(app_addr_start) | \
-		grep ecdsa-sha2 > ~$(local_login)/.ssh/known_hosts &&\
-		chmod 600 ~$(local_login)/.ssh/known_hosts'; \
-	fi" $(provisioner_hostname) &&\
-	vagrant reload --provision $(provisioner_hostname) ) || exit 1
+vagrant-reload: parse_env_details
+	$(quiet)( vagrant ssh -c \
+		"cd /projects/${app_hostname_base}/roles/ansible-role.ansible-playbook/scripts && \
+		source ./vagrant-reload.sh \
+			'$(local_login)' \
+			'$(prov_addr_start)' \
+			'$(app_addr_start)' \
+			'$(app_hostname_base)' \
+			'$(app_node_count)'" \
+		$(provisioner_hostname) &&\
+		vagrant reload --provision $(provisioner_hostname) \
+	) || exit 1
 
 
 # Setup ssh certs and ansible on the provisioner
@@ -158,34 +165,6 @@ git-pull-origin-master:
 .PHONY: git-push-origin-master
 git-push-origin-master:
 	$(quiet)git push origin master
-
-# Copy the password files from the windows home directory to the projects target dir
-.PHONY: vagrant-ansible-passwords
-vagrant-ansible-passwords:
-	$(quiet)vault_file=~/.vault_password_file &&\
-	vault_target_file="target/.vault_password_file" &&\
-	if [[ -e $${vault_file} ]]; then \
-		if [[ ! -e $${vault_target_file} ]]; then \
-			echo "[Makefile.$@] Copying password file: $${vault_file}" &&\
-			mkdir -p target &&\
-			cp $${vault_file} target/; \
-		fi; \
-	else \
-		echo "[ERROR] Missing password file: `hostname`:$${vault_file}" &&\
-		exit 1; \
-	fi &&\
-	ansible_file=~/.ansible_password_file &&\
-	ansible_target_file="target/.ansible_password_file" &&\
-	if [[ -e $${ansible_file} ]]; then \
-		if [[ ! -e $${ansible_target_file} ]]; then \
-			echo "[Makefile.$@] Copying password file: $${ansible_file}" &&\
-			mkdir -p target &&\
-			cp $${ansible_file} target/; \
-		fi; \
-	else \
-		echo "[ERROR] Missing password file: `hostname`:$${ansible_file}" &&\
-		exit 1; \
-	fi
 
 .PHONY: windows-needs-admin
 windows-needs-admin:
@@ -215,7 +194,7 @@ create-inventory: linux-bootstrap
 .PHONY: linux-bootstrap
 linux-bootstrap:
 	# FIXME: Need to add username=$(ldap_login) and password=$(ANSIBLE_PASSWORD_FILE) to /etc/yum.conf: [main] section
-	@( sudo yum install -y epel-release &&\
+	$(quiet)( sudo yum install -y epel-release &&\
 	sudo yum -y update &&\
 	sudo yum install -y libselinux-python python3 python3-pip jq sshpass &&\
 	sudo su - root -c "pip3 install --upgrade pip" &&\
@@ -224,24 +203,31 @@ linux-bootstrap:
 # The provisioner provides Docker and GECK so ansible must be run native on linux.
 .PHONY: linux-provisioner
 linux-provisioner: linux-bootstrap
-	@( echo "[Makefile.$@] Apply provisioner ansible-playbook" && \
+	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for provisioner " && \
 	export ANSIBLE_FORCE_COLOR=true && \
 	ansible-playbook \
 	--inventory $(inventory_file) \
-	--vault-id=$(VAGRANT_PASSWORD_FILE) \
-	-e env_name='$(env_name)' \
-	provisioner.playbook 2>&1 ) || ( export RETURN_CODE=$$? && echo "linux-provisioner RC: $$RETURN_CODE"; exit $$RETURN_CODE )
-#	ansible-playbook.provisioner.yml 2>&1 | tee $(log_dir)/$@.log 
+	--vault-id=$(vault_password_file) \
+	-e env_name="$(env_name)" \
+	provisioner.playbook 2>&1 | tee $(log_dir)/$@.log ) || ( export RETURN_CODE=$$? && echo "$@ RC: $$RETURN_CODE"; exit $$RETURN_CODE )
+
   
 # Initialises a host before it has docker and geck installed
 .PHONY: linux-appliance
-linux-appliance: linux-bootstrap
+linux-appliance:
+	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for appliance " && \
 	export ANSIBLE_FORCE_COLOR=true && \
 	ansible-playbook \
 	--inventory $(inventory_file) \
-	--vault-id=$(VAGRANT_PASSWORD_FILE) \
-	-e env_name='$(env_name)' \
-	appliance.playbook 2>&1 | tee $(log_dir)/$@.log || exit 1
+	--vault-id=$(vault_password_file) \
+	-e env_name="$(env_name)" \
+	appliance.playbook 2>&1 | tee $(log_dir)/$@.log ) || ( export RETURN_CODE=$$? && echo "$@ RC: $$RETURN_CODE"; exit $$RETURN_CODE )
+
+check-vault-password-file:
+	$(quiet)if [[ ! -e $(vault_password_file) ]]; then \
+	  echo "[ERROR] Missing file: $(vault_password_file)" && \
+	  exit 1; \
+	fi
 
 # LINUX ONLY: This command will only work on a Linux host i.e. provisioner
 # Passwords used by the scripts are stored in an encrypted vault file called vault/credentials.yml
@@ -252,21 +238,17 @@ linux-appliance: linux-bootstrap
 #    ${HOME}/.vault_password_file. 
 # If this password doesn't unlock the vault files, a template file will be copied to target/credentials.yml.
 # Once extracted, modify target/credentials.yml and then call "make vault-encrypt" to update the encrypted vault file.
-vault-decrypt:
-	$(HIDE_CMD)if ! ansible-vault view vault/*.yml > target/credentials.yml; then \
-	   echo "[TO FIX THIS] Modify target/credentials.yml then use 'make vault_encrypt'" && \
-		 cp scripts/ansible-playbook.common-scripts/credentials.yml target/credentials.yml; \
+vault-decrypt: check-vault-password-file
+	$(quiet)if ! ( ansible-vault --vault-password-file=$(vault_password_file) view vault/*.yml > target/credentials.yml ); then \
+	  echo "[TO FIX THIS] Modify target/credentials.yml then use 'make vault_encrypt'" && \
+	  cp roles/ansible-role.ansible-playbook/templates/credentials.yml target/credentials.yml; \
 	fi;
 
 # LINUX ONLY: This command will only work on a Linux host i.e. provisioner
 # Encrypts the contents of target/credentials.yml to replace vault/credentials.yml
 # The file ansible.cfg declares the location of the vault password file e.g. 
 #    ${HOME}/.vault_password_file. 
-vault-encrypt:
-	$(HIDE_CMD)if [[ ! -e $(VAGRANT_PASSWORD_FILE) ]]; then \
-	  echo "[ERROR] Missing file: $(VAGRANT_PASSWORD_FILE)" && \
-	  exit 1; \
-	fi && \
-	( cat $(VAGRANT_PASSWORD_FILE) | ansible-vault encrypt --output target/credentials-encrypted.yml target/credentials.yml ) && \
+vault-encrypt: check-vault-password-file
+	$(quiet)( ansible-vault --vault-password-file=$(vault_password_file) encrypt --output target/credentials-encrypted.yml target/credentials.yml ) && \
 	cp target/credentials-encrypted.yml vault/credentials.yml && \
 	rm -f target/credentials-encrypted.yml target/credentials.yml

@@ -1,6 +1,4 @@
-#!/bin/bash
-set -e
-set -u
+#!/bin/bash -eu
 
 # Initialise an ansible-playbook project.
 playbook_name=$1

@@ -3,9 +3,7 @@ require 'shellwords'
 
 nicRoutePath = "/etc/sysconfig/network-scripts/route-eth1"
 
-sshKeyName = "vagrant"
-#sshKeyName = "devops.id_rsa"
-ssh_prv_key_path = "#{Dir.home}/.ssh/#{sshKeyName}"
+ssh_prv_key_path = "#{Dir.home}/.vagrant.d/insecure_private_key"
 ssh_prv_key = ""
 # Windows user running Vagrant has to have keys available
 if File.file?("#{ssh_prv_key_path}")
@@ -157,6 +155,7 @@ echo "######################################################"
 ansibleAccount=$1
 ansiblePassword=$2
 vaultPassword=$3
+sshPrivateKeyFile="#{ssh_prv_key_path}"
 sshPrivateKeyString="#{ssh_prv_key}"
 
 if [[ $# -ne 3 ]]; then
@@ -225,14 +224,6 @@ fi
 # Running as root, so switch created files to ${ansibleAccount} user
 chown -R ${ansibleAccount}:users ${homeDir}
 
-# Vagrant images have password login disabled.
-# The geck docker image assumes password login.
-# Create a copy of devops ssh keys for the root user in the geck container.
-sshDirForGeck="${homeDir}/.ssh-geck"
-mkdir -p ${sshDirForGeck}
-cp -R ${sshDir}/* ${sshDirForGeck} 
-chown -R root:root ${sshDirForGeck}
-
 # Vagrant box has password login disabled; but sssd/ad users expect password login.
 # Re-enable password login
 sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/" /etc/ssh/sshd_config
@@ -264,9 +255,8 @@ HOST_CONFIG_WIN10_HEREDOC
 # Run the ansible-playbook only on the provisioner as the ansible user.
 # Cannot run as root because ansible isn't on the path for root.
 $run_ansible_playbook = <<-RUN_ANSIBLE_PLAYBOOK_HEREDOC
-#!/bin/bash 
-set -e
-set -u
+#!/bin/bash -eu
+
 ansibleAccount=$1
 targetBaseName=$2
 targetOsFamily=$3
@@ -290,7 +280,6 @@ fi
 if [[ ! -e /etc/ansible/.bootstrapped ]]; then
   echo "######################################################"
   echo "[Vagrantfile.run_ansible_playbook] Calling Makefile target: linux-provisioner"
-  # Install Geck on provisioner.
   sudo su - ${ansibleAccount} -c " ( cd /projects/${targetBaseName} && make env_name=vagrant linux-provisioner ) || exit 1 "
 fi
 
