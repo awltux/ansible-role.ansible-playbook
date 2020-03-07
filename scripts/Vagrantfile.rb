@@ -155,7 +155,6 @@ echo "######################################################"
 ansibleAccount=$1
 ansiblePassword=$2
 vaultPassword=$3
-sshPrivateKeyFile="#{ssh_prv_key_path}"
 sshPrivateKeyString="#{ssh_prv_key}"
 
 if [[ $# -ne 3 ]]; then
@@ -165,9 +164,10 @@ fi
 
 homeDir="/home/${ansibleAccount}"
 
+# Create the ansibleAccount if it doesn't exist
 if ! id -u ${ansibleAccount} > /dev/null 2>&1; then
   echo "[Vagrantfile.host_config_linux] USER: Create the ansible user '${ansibleAccount}' if it doesnt exist"
-  # Allow sudo to root and access to vBox sharedfolders
+  # Allow ansibleAccount to sudo and access to vBox sharedfolders
   useradd -g users -G wheel,vagrant -d ${homeDir} -s /bin/bash -p $(echo ${ansiblePassword} | openssl passwd -1 -stdin) ${ansibleAccount}
 fi 
 # These are used by ansible build
@@ -188,7 +188,7 @@ sed -i 's/[#[:space:]]*Defaults:[[:space:]]\+\!\?requiretty/Defaults: !requirett
 # It will be re-applied by ansible-role.github.hardening
 sed -i "s/^TMOUT=.*/TMOUT=0/"  /etc/profile
 
-echo "[Vagrantfile.host_config_linux] SSH KEYS: Copy vagrant ssh key to allow passwordless login"
+echo "[Vagrantfile.host_config_linux] SSH KEYS: Copy ssh key to allow passwordless login"
 sshDir="${homeDir}/.ssh"
 tmpPrivateKey=${sshDir}/${ansibleAccount}
 rsaPrivateKey=${sshDir}/id_rsa
@@ -202,11 +202,12 @@ mkdir -p ${sshDir}
 echo "${sshPrivateKeyString}" > ${tmpPrivateKey}
 chmod 600 ${tmpPrivateKey}
 
-# Extract public key from private key
-ssh_pub_key=`ssh-keygen -y -f ${tmpPrivateKey}`
+# Extract public key from tmp private key
+ssh_pub_key=`openssl rsa -in ${tmpPrivateKey} -pubout -outform PEM`
+authorized_keys=`ssh-keygen -y -f ${tmpPrivateKey}`
 
 # Has this key been added to authorized_keys already?
-if grep -sq "${ssh_pub_key}" ${authorizedKeys}; then
+if grep -sq "${authorized_keys}" ${authorizedKeys}; then
   echo "[Vagrantfile.host_config_linux] SSH keys already provisioned for: ${ansibleAccount}"
 else
   echo "[Vagrantfile.host_config_linux] Creating SSH keys for: ${ansibleAccount}"
@@ -217,7 +218,7 @@ else
   chmod 644 ${rsaPublicKey}
 
   touch ${authorizedKeys}
-  echo "${ssh_pub_key}" >> ${authorizedKeys}
+  echo "${authorized_keys}" >> ${authorizedKeys}
   chmod 600 ${authorizedKeys}
 fi
 
@@ -255,12 +256,11 @@ HOST_CONFIG_WIN10_HEREDOC
 # Run the ansible-playbook only on the provisioner as the ansible user.
 # Cannot run as root because ansible isn't on the path for root.
 $run_ansible_playbook = <<-RUN_ANSIBLE_PLAYBOOK_HEREDOC
-#!/bin/bash -eu
+#!/bin/bash -eux
 
 ansibleAccount=$1
 targetBaseName=$2
 targetOsFamily=$3
-provisionType=$4
 
 echo "######################################################"
 echo "[Vagrantfile.run_ansible_playbook] $(hostname)"
@@ -268,10 +268,9 @@ echo "######################################################"
 echo "    ansibleAccount=${ansibleAccount}"
 echo "    targetBaseName=${targetBaseName}"
 echo "    targetOsFamily=${targetOsFamily}"
-echo "    provisionType =${provisionType}"
 echo "    whoami        =$(whoami)"
 
-if [[ $# -ne 4 ]]; then
+if [[ $# -ne 3 ]]; then
   echo "[ERROR] Invalid paramter count: $($args.count)"
   exit 1
 fi
@@ -293,7 +292,7 @@ RUN_ANSIBLE_PLAYBOOK_HEREDOC
 # Called from this.createCluster()
 # Runs the ansible configuration scripts on the VM
 def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVmIp, ansiblePassword, vaultPassword, currentNodeIndex)
-  vmNetCidr = "#{clusterDetails['vmBaseIp']}.0/24"
+  vmNetCidr = "#{clusterDetails['vmNetBaseIp']}.0/24"
   currentOsFamily = nodeGroup['osFamily']
   # Allows all machines to support ssh login from Virtualbox host
   # Builds should run though jumpbox at 2222
@@ -313,14 +312,9 @@ def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVm
     # Windows install can take a long time and can cause the winrm 'keep alive' to panic and quit
     machine.winrm.retry_limit = 30
     machine.winrm.retry_delay = 10
-    if nodeGroup['kerberosEnabled']
-      machine.winrm.username = clusterDetails['ldapLogin'] + '@' + clusterDetails['ldapRealm'].downcase
-      machine.winrm.transport = :kerberos
-    else
-      machine.winrm.username = clusterDetails['localLogin']
-      machine.winrm.transport = :plaintext
-      machine.winrm.basic_auth_only = true
-    end
+    machine.winrm.username = clusterDetails['localLogin']
+    machine.winrm.transport = :plaintext
+    machine.winrm.basic_auth_only = true
     machine.vm.boot_timeout = 600
     machine.vm.graceful_halt_timeout = 600
     machine.vm.network :forwarded_port, guest: 3389, host: rdpPortForwarded, id: "RDP"
@@ -333,7 +327,6 @@ def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVm
 
   targetOsFamily = ''
   appHostnameBase = ''
-  provisionType = 'geck'
   # CONFIGURE NETWORK ROUTING FROM THIS VM TO ALL OTHER VM IN CLUSTER
   # Add route and /etc/hosts entries for all other nodes in cluster
   # This is primarily because Vagrant hihacks eth0 for NAT connections.
@@ -343,8 +336,8 @@ def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVm
       if targetNodeType['hostnameArray'] and ((targetNodeType['hostnameArray']).length == targetNodeType['nodeCount'])
         targetHostName = "#{targetNodeType['hostnameArray'][targetNodeIndex]}"
       end
-      targetVmIp = "#{clusterDetails['vmBaseIp']}.#{targetNodeType['addrStart'] + targetNodeIndex}"
-      targetNatBaseIp = "#{clusterDetails['natBaseIp']}.#{targetNodeType['addrStart'] + targetNodeIndex}"
+      targetVmIp = "#{clusterDetails['vmNetBaseIp']}.#{targetNodeType['addrStart'] + targetNodeIndex}"
+      targetNatBaseIp = "#{clusterDetails['natNetBaseIp']}.#{targetNodeType['addrStart'] + targetNodeIndex}"
       # Vagrant hard coded address
       targetNatIp = "#{targetNatBaseIp}.15"
       targetNatNetIp = "#{targetNatBaseIp}.0"
@@ -368,9 +361,6 @@ def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVm
     if targetNodeType['nodeGroup'] == 'appliance'
       targetOsFamily = targetNodeType['osFamily']
       appHostnameBase = targetNodeType['hostnameBase']
-      if targetNodeType['provisionType']
-        provisionType = targetNodeType['provisionType']
-      end
     end
   end
 
@@ -379,11 +369,11 @@ def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVm
     if currentOsFamily == 'linux'
       ansibleUsername = clusterDetails['localLogin']
       # Dollars in passwords cause problems; escape them.
-      escapedVagrantPassword = Shellwords.escape(vaultPassword)
+      escapedVaultPassword = Shellwords.escape(vaultPassword)
       escapedAnsiblePassword = Shellwords.escape(ansiblePassword)
       
       bash_shell.inline = $host_config_linux
-      bash_shell.args = "#{ansibleUsername} #{escapedAnsiblePassword} #{escapedVagrantPassword}"
+      bash_shell.args = "#{ansibleUsername} #{escapedAnsiblePassword} #{escapedVaultPassword}"
     else
       # TODO: Shouldn't assume Windows if not Linux!
       bash_shell.inline = $host_config_win10
@@ -393,12 +383,17 @@ def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVm
   end
 
   # Only the provisioner runs ansible
-  if clusterDetails['provisionerHostname'] == currentHostName
+  provisionerHostnameBase = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['hostnameBase']
+  provisionerAddrStart = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['addrStart']
+  provisionerHostname = "#{provisionerHostnameBase}-#{provisionerAddrStart}"
+  puts "provisionerHostname=#{provisionerHostname}"
+  puts "currentHostName=#{currentHostName}"
+  if provisionerHostname == currentHostName
     machine.vm.synced_folder ".", "/projects/#{appHostnameBase}", automount: true, mount_options: ["dmode=770,fmode=660"]
     machine.vm.provision  "shell" do |bash_shell|
       bash_shell.inline = $run_ansible_playbook
       bash_shell.privileged = false
-      bash_shell.args = "#{clusterDetails['localLogin']} '#{appHostnameBase}' '#{targetOsFamily}' '#{provisionType}'"
+      bash_shell.args = "#{clusterDetails['localLogin']} '#{appHostnameBase}' '#{targetOsFamily}'"
     end
   end
 
@@ -432,8 +427,8 @@ def createCluster(clusterDetails, vagrantCommand='default')
           currentNodeVersion = nodeGroup['imageVersion'] + '.' + nodeGroup['parentBuildNumber']
         end
         
-        currentHostCidr = "#{clusterDetails['natBaseIp']}.#{nodeGroup['addrStart'] + nodeIndex}.0/#{clusterDetails['natNetCidrMask']}"
-        currentVmIp = "#{clusterDetails['vmBaseIp']}.#{nodeGroup['addrStart'] + nodeIndex}"
+        currentHostCidr = "#{clusterDetails['natNetBaseIp']}.#{nodeGroup['addrStart'] + nodeIndex}.0/#{clusterDetails['natNetCidrMask']}"
+        currentVmIp = "#{clusterDetails['vmNetBaseIp']}.#{nodeGroup['addrStart'] + nodeIndex}"
         currentVmNetMask = "255.255.255.0"
         
         config.vm.define "#{currentNodeName}" do |machine|

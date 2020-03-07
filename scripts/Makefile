@@ -14,6 +14,7 @@ env_name ?= vagrant
 profile ?=
 project_name ?=
 log_dir ?= target
+ssh_config_file = target/ssh.config
 
 quiet := @
 ifneq ($(debug),false)
@@ -23,13 +24,17 @@ ifneq ($(debug),)
 endif
 endif
 
-_project_name = $(shell basename $$(pwd))
+_project_name = $(shell basename $(shell pwd))
 ifneq ($(project_name),)
 _project_name = $(project_name)
 endif
 $(info project_name = $(_project_name) )
 
-cluster_details_file ?= environments/vagrant/environment.json
+ifeq ($(shell test -e environments/$(env_name)/environment.json && echo -n yes),yes)
+cluster_details_file ?= environments/$(env_name)/environment.json
+else
+cluster_details_file ?= environments/environment.json
+endif
 inventory_file ?= environments/$(env_name)/inventory.ini
 
 # Use password files in home before target
@@ -52,32 +57,40 @@ ANSIBLE_PASSWORD_FILE = target/.ansible_password_file
 endif
 $(info ANSIBLE_PASSWORD_FILE=$(ANSIBLE_PASSWORD_FILE))
 
-
 .DEFAULT_GOAL := list
-
-.PHONY: parse_env_details
-parse_env_details:
-# The jq app may not have been installed yet
-ifneq (, $(shell which jq))
-provisioner_hostname := $(shell jq '.provisionerHostname' $(cluster_details_file) | sed 's/\"//g' )
-prov_addr_start   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(cluster_details_file) | sed 's/\"//g' )
-local_login := $(shell jq '.localLogin' $(cluster_details_file) | sed 's/\"//g')
-# APPLIANCE CONFIG
-app_hostname_base := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .hostnameBase?' $(cluster_details_file) | sed 's/\"//g' )
-app_addr_start    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(cluster_details_file) | sed 's/\"//g' )
-app_node_count    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(cluster_details_file) | sed 's/\"//g' )
-endif
 
 # List the makefile targets
 .PHONY: list
 list:
 	$(quiet)make -pRrq | \
 	grep '^\([a-zA-Z0-9_-]\+\):.*' | \
-	sed 's/^\([a-zA-Z0-9_-]\+\):.*/   \1/'
+	sed 's/^\([a-zA-Z0-9_-]\+\):.*/   \1/' | \
+	sort
 
 .PHONY: help
 help:
 	@: $(info $(help_text))
+
+.PHONY: mkdir_target
+mkdir_target:
+	$(quiet)mkdir -p target
+
+.PHONY: load-node-data
+load-node-data:
+# The jq app may not have been installed yet
+ifneq (,$(shell which jq))
+local_login          := $(shell jq '.localLogin' $(cluster_details_file) | sed 's/\"//g')
+# PROVISIONER CONFIG
+prov_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .hostnameBase?' $(cluster_details_file) | sed 's/\"//g' )
+prov_addr_start      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(cluster_details_file) | sed 's/\"//g' )
+provisioner_hostname := $(prov_hostname_base)-$(prov_addr_start)
+# APPLIANCE CONFIG
+app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .hostnameBase?' $(cluster_details_file) | sed 's/\"//g' )
+app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(cluster_details_file) | sed 's/\"//g' )
+app_node_count       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(cluster_details_file) | sed 's/\"//g' )
+
+$(info provisioner_hostname=$(provisioner_hostname))
+endif
 
 # Validate that the env_name property is defined and points to a valid environment file.
 .PHONY: validate-env-name
@@ -111,7 +124,7 @@ validate-profile:
 # On Windows install gnuwin32 version of make
 # http://gnuwin32.sourceforge.net/packages/make.htm
 .PHONY: vagrant-up
-vagrant-up: parse_env_details
+vagrant-up: load-node-data
 	$(quiet)( \
 	if ! (vagrant plugin list | grep -q vagrant-vbguest); then \
 	  echo "#################################################" &&\
@@ -122,24 +135,37 @@ vagrant-up: parse_env_details
 	echo "#################################################" &&\
 	echo "## RUNNING VAGRANT UP" &&\
 	echo "#################################################" &&\
-	vagrant up \
+	vagrant up &&\
+	echo "#################################################" &&\
+	echo "## Extracting SSH config to file: $(ssh_config_file)" &&\
+	echo "#################################################" &&\
+	vagrant ssh-config $(provisioner_hostname) > $(ssh_config_file) \
 	) || exit 1
 
 # Run just the ansible provisioning on the jumpbox VM
+# If provisioner hasnt been previously bootstrapped, add the host key to .ssh/known_hosts 
 .PHONY: vagrant-reload
-vagrant-reload: parse_env_details
-	$(quiet)( vagrant ssh -c \
-		"cd /projects/${app_hostname_base}/roles/ansible-role.ansible-playbook/scripts && \
-		source ./vagrant-reload.sh \
-			'$(local_login)' \
-			'$(prov_addr_start)' \
-			'$(app_addr_start)' \
-			'$(app_hostname_base)' \
-			'$(app_node_count)'" \
-		$(provisioner_hostname) &&\
-		vagrant reload --provision $(provisioner_hostname) \
+vagrant-reload: load-node-data
+	$(quiet)( ssh -F $(ssh_config_file) $(provisioner_hostname) \
+	"if [[ ! -e /etc/ansible/.bootstrapped ]]; then \
+		sudo -u $(local_login) bash -c \
+			'ssh-keyscan $(provisioner_hostname) | grep ecdsa-sha2 > ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts' &&\
+		if [[ $(app_node_count) -gt 0 ]]; then \
+			app_node_max=$$(( $(app_node_count) - 1 )) &&\
+			app_node_seq=\$$(seq 0 \$${app_node_max}); \
+			for app_index in \$${app_node_seq}; do \
+				app_node_index=\$$(( $(app_addr_start) + \$${app_index} )) &&\
+				app_hostname=\"$(app_hostname_base)-\$${app_node_index}\" &&\
+				sudo -u $(local_login) bash -c \
+				  \"ssh-keyscan \$${app_hostname} | grep ecdsa-sha2 >> ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts\"; \
+			done \
+		fi \
+	fi" &&\
+	echo "#################################################" &&\
+	echo "## Running 'vagrant reload --provision $(provisioner_hostname)" &&\
+	echo "#################################################" &&\
+	vagrant reload --provision $(provisioner_hostname) \
 	) || exit 1
-
 
 # Setup ssh certs and ansible on the provisioner
 .PHONY: ansible-setup
