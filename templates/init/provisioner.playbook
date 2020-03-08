@@ -6,7 +6,6 @@
     - vault/credentials.yml
     - vars/main.yml
     # Optional local configuration; default is to re-load vars
-    - [ "target/environments/{{ env_name }}.yml", "vars/main.yml" ]
+    - [ "target/environments/{{ env_name }}/main.yml", "vars/main.yml" ]
   roles:
-    - role: ansible-role.provisioner
-
+    - role: provide.provisioner

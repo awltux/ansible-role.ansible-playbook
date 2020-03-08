@@ -6,4 +6,4 @@ export profile
 project_name = $(shell basename $(pwd))
 $(info project_name = $(project_name) )
 
-include roles\ansible-role.ansible-playbook\scripts\Makefile
+include roles/ansible-role.ansible-playbook/scripts/Makefile
