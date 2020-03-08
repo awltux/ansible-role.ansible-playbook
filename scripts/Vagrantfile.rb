@@ -18,17 +18,25 @@ end
 # Each host calls this for each member of the cluster
 $network_config_linux = <<-ADD_NETWORK_CONFIG_LINUX_HEREDOC
 #!/bin/bash -eu
+debug=$1
+echo "######################################################"
+echo "[Vagrantfile.network_config_linux]  $(whoami)@$(hostname)"
+echo "######################################################"
+if [[ $debug ]]; then
+set -x
+fi
 
-currentVmIp=$1
-targetHostName=$2
-targetNatIp=$3
-targetNatNetCidr=$4
-targetNatNetIp=$5
-targetNatNetMask=$6
-targetVmIp=$7
-ldapRealm=$8
+currentVmIp=$2
+targetHostName=$3
+targetNatIp=$4
+targetNatNetCidr=$5
+targetNatNetIp=$6
+targetNatNetMask=$7
+targetVmIp=$8
+ldapRealm=$9
 
-if [[ $# -ne 8 ]]; then
+
+if [[ $# -ne 9 ]]; then
   echo "[ERROR] Invalid number of parameters for network_config_linux: $#"
   exit 1
 fi
@@ -65,16 +73,17 @@ ADD_NETWORK_CONFIG_LINUX_HEREDOC
 $network_config_win10 = <<-ADD_NETWORK_CONFIG_WIN10_HEREDOC
 # powershell
 
-$currentVmIp=$args[0]
-$targetHostName=$args[1]
-$targetNatIp=$args[2]
-$targetNatNetCidr=$args[3]
-$targetNatNetIp_NOT_USED_FOR_WIN10=$args[4]
-$targetNatNetMask_NOT_USED_FOR_WIN10=$args[5]
-$targetVmIp=$args[6]
-$ldapRealm=$args[7]
+$debug=$args[0]
+$currentVmIp=$args[1]
+$targetHostName=$args[2]
+$targetNatIp=$args[3]
+$targetNatNetCidr=$args[4]
+$targetNatNetIp_NOT_USED_FOR_WIN10=$args[5]
+$targetNatNetMask_NOT_USED_FOR_WIN10=$args[6]
+$targetVmIp=$args[7]
+$ldapRealm=$args[8]
 
-if (-NOT ($args.count -eq 8)) {
+if (-NOT ($args.count -eq 9)) {
   echo "[ERROR] Invalid paramter count for network_config_win10: $($args.count)"
   exit 1
 }
@@ -148,9 +157,8 @@ ADD_NETWORK_CONFIG_WIN10_HEREDOC
 $host_config_linux = <<-HOST_CONFIG_LINUX_HEREDOC
 #!/bin/bash -eu
 echo "######################################################"
-echo "[Vagrantfile.host_config_linux]  $(hostname)"
+echo "[Vagrantfile.host_config_linux]  $(whoami)@$(hostname)"
 echo "######################################################"
-
 
 ansibleAccount=$1
 ansiblePassword=$2
@@ -256,21 +264,21 @@ HOST_CONFIG_WIN10_HEREDOC
 # Run the ansible-playbook only on the provisioner as the ansible user.
 # Cannot run as root because ansible isn't on the path for root.
 $run_ansible_playbook = <<-RUN_ANSIBLE_PLAYBOOK_HEREDOC
-#!/bin/bash -eux
-
-ansibleAccount=$1
-targetBaseName=$2
-targetOsFamily=$3
+#!/bin/bash -eu
+debug=$1
 
 echo "######################################################"
-echo "[Vagrantfile.run_ansible_playbook] $(hostname)"
+echo "[Vagrantfile.run_ansible_playbook] $(whoami)@$(hostname)"
 echo "######################################################"
-echo "    ansibleAccount=${ansibleAccount}"
-echo "    targetBaseName=${targetBaseName}"
-echo "    targetOsFamily=${targetOsFamily}"
-echo "    whoami        =$(whoami)"
+if [[ $debug ]]; then
+set -x
+fi
 
-if [[ $# -ne 3 ]]; then
+ansibleAccount=$2
+targetBaseName=$3
+targetOsFamily=$4
+
+if [[ $# -ne 4 ]]; then
   echo "[ERROR] Invalid paramter count: $($args.count)"
   exit 1
 fi
@@ -279,19 +287,19 @@ fi
 if [[ ! -e /etc/ansible/.bootstrapped ]]; then
   echo "######################################################"
   echo "[Vagrantfile.run_ansible_playbook] Calling Makefile target: linux-provisioner"
-  sudo su - ${ansibleAccount} -c " ( cd /projects/${targetBaseName} && make env_name=vagrant linux-provisioner ) || exit 1 "
+  sudo su - ${ansibleAccount} -c " ( cd /projects/${targetBaseName} && make env_name=vagrant debug=${debug} linux-provisioner ) || exit 1 "
 fi
 
 echo "######################################################"
 echo "[Vagrantfile.run_ansible_playbook] Calling Makefile target: ${targetOsFamily}-appliance"
-sudo su - ${ansibleAccount} -c "( cd /projects/${targetBaseName} && make env_name=vagrant ${targetOsFamily}-appliance ) || exit 1"
+sudo su - ${ansibleAccount} -c "( cd /projects/${targetBaseName} && make env_name=vagrant debug=${debug} ${targetOsFamily}-appliance ) || exit 1"
 
 RUN_ANSIBLE_PLAYBOOK_HEREDOC
 
 
 # Called from this.createCluster()
 # Runs the ansible configuration scripts on the VM
-def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVmIp, ansiblePassword, vaultPassword, currentNodeIndex)
+def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, currentVmIp, ansiblePassword, vaultPassword, currentNodeIndex)
   vmNetCidr = "#{clusterDetails['vmNetBaseIp']}.0/24"
   currentOsFamily = nodeGroup['osFamily']
   # Allows all machines to support ssh login from Virtualbox host
@@ -354,7 +362,7 @@ def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVm
             # Call network configuration function for Windows (declared above)
             bash_shell.inline = $network_config_win10
           end
-          bash_shell.args = "#{currentVmIp} #{targetHostName} #{targetNatIp} #{targetNatNetCidr} #{targetNatNetIp} #{targetNatNetMask} #{targetVmIp} #{ldapRealm}"
+          bash_shell.args = "#{debug} #{currentVmIp} #{targetHostName} #{targetNatIp} #{targetNatNetCidr} #{targetNatNetIp} #{targetNatNetMask} #{targetVmIp} #{ldapRealm}"
         end
       end
     end
@@ -393,7 +401,7 @@ def configureHost(nodeGroup, machine, clusterDetails, currentHostName, currentVm
     machine.vm.provision  "shell" do |bash_shell|
       bash_shell.inline = $run_ansible_playbook
       bash_shell.privileged = false
-      bash_shell.args = "#{clusterDetails['localLogin']} '#{appHostnameBase}' '#{targetOsFamily}'"
+      bash_shell.args = "'#{debug}' #{clusterDetails['localLogin']} '#{appHostnameBase}' '#{targetOsFamily}'"
     end
   end
 
@@ -401,7 +409,7 @@ end
 
 # Called from project ../../Vagrantfile
 # Create a VM for each node declared by clusterDetails.nodeGroups (normally just a provisioner and an appliance )
-def createCluster(clusterDetails, vagrantCommand='default')
+def createCluster(clusterDetails, debug=false, vagrantCommand='default')
   vault_password   = File.read( ENV['HOME'] + "/.vault_password_file")
   ansible_password = File.read( ENV['HOME'] + "/.ansible_password_file")
   
@@ -447,7 +455,7 @@ def createCluster(clusterDetails, vagrantCommand='default')
             provider_vm.customize ['modifyvm',:id, '--natnet1', "#{currentHostCidr}"]
           end
           # Clean VM has been created, now run ansible configuration on it.
-          configureHost(nodeGroup, machine, clusterDetails, currentNodeName, currentVmIp, ansible_password, vault_password, currentNodeIndex)
+          configureHost(debug, nodeGroup, machine, clusterDetails, currentNodeName, currentVmIp, ansible_password, vault_password, currentNodeIndex)
         end
       end
     end

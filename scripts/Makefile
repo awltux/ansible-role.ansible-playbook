@@ -30,11 +30,13 @@ _project_name = $(project_name)
 endif
 $(info project_name = $(_project_name) )
 
-ifeq ($(shell test -e environments/$(env_name)/environment.json && echo -n yes),yes)
+$(info env_name=$(env_name))
+
 cluster_details_file ?= environments/$(env_name)/environment.json
-else
+ifneq ($(shell test -e environments/$(env_name)/environment.json && echo -n yes),yes)
 cluster_details_file ?= environments/environment.json
 endif
+$(info cluster_details_file=$(cluster_details_file))
 inventory_file ?= environments/$(env_name)/inventory.ini
 
 # Use password files in home before target
@@ -88,8 +90,6 @@ provisioner_hostname := $(prov_hostname_base)-$(prov_addr_start)
 app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .hostnameBase?' $(cluster_details_file) | sed 's/\"//g' )
 app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(cluster_details_file) | sed 's/\"//g' )
 app_node_count       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(cluster_details_file) | sed 's/\"//g' )
-
-$(info provisioner_hostname=$(provisioner_hostname))
 endif
 
 # Validate that the env_name property is defined and points to a valid environment file.
@@ -220,11 +220,19 @@ create-inventory: linux-bootstrap
 .PHONY: linux-bootstrap
 linux-bootstrap:
 	# FIXME: Need to add username=$(ldap_login) and password=$(ANSIBLE_PASSWORD_FILE) to /etc/yum.conf: [main] section
-	$(quiet)( sudo yum install -y epel-release &&\
-	sudo yum -y update &&\
-	sudo yum install -y libselinux-python python3 python3-pip jq sshpass &&\
-	sudo su - root -c "pip3 install --upgrade pip" &&\
-	sudo su - root -c "pip3 install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" ) || exit 1
+	$(quiet)( \
+	flag_file=/etc/$@ &&\
+	if [[ ! -e $${flag_file} ]]; then \
+	  sudo yum install -y epel-release &&\
+	  sudo yum -y update &&\
+	  sudo yum install -y libselinux-python python3 python3-pip jq sshpass &&\
+	  sudo su - root -c "pip3 install --upgrade pip" &&\
+	  sudo su - root -c "pip3 install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" &&\
+	  sudo touch $${flag_file}; \
+	else \
+	  echo "[SKIPPING linux-bootstrap] Found $(hostname):$${flag_file}"; \
+	fi \
+	) || exit 1
 
 # The provisioner provides Docker and GECK so ansible must be run native on linux.
 .PHONY: linux-provisioner
