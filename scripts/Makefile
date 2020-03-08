@@ -24,7 +24,7 @@ ifneq ($(debug),)
 endif
 endif
 
-_project_name = $(shell basename $(shell pwd))
+_project_name = $(shell basename $$(pwd))
 ifneq ($(project_name),)
 _project_name = $(project_name)
 endif
@@ -125,7 +125,7 @@ validate-profile:
 # http://gnuwin32.sourceforge.net/packages/make.htm
 .PHONY: vagrant-up
 vagrant-up: load-node-data
-	$(quiet)( \
+	$(quiet) time ( \
 	if ! (vagrant plugin list | grep -q vagrant-vbguest); then \
 	  echo "#################################################" &&\
 	  echo "## INSTALL VAGRANT PLUGIN: VirtualBox Guest installer" &&\
@@ -146,8 +146,9 @@ vagrant-up: load-node-data
 # If provisioner hasnt been previously bootstrapped, add the host key to .ssh/known_hosts 
 .PHONY: vagrant-reload
 vagrant-reload: load-node-data
-	$(quiet)( ssh -F $(ssh_config_file) $(provisioner_hostname) \
-	"if [[ ! -e /etc/ansible/.bootstrapped ]]; then \
+	$(quiet) time ( \
+	ssh -F $(ssh_config_file) $(provisioner_hostname) \
+	"if [[ ! -e /etc/ansible/linux-provisioner ]]; then \
 		sudo -u $(local_login) bash -c \
 			'ssh-keyscan $(provisioner_hostname) | grep ecdsa-sha2 > ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts' &&\
 		if [[ $(app_node_count) -gt 0 ]]; then \
@@ -221,13 +222,15 @@ create-inventory: linux-bootstrap
 linux-bootstrap:
 	# FIXME: Need to add username=$(ldap_login) and password=$(ANSIBLE_PASSWORD_FILE) to /etc/yum.conf: [main] section
 	$(quiet)( \
-	flag_file=/etc/$@ &&\
+	flag_dir=/etc/ansible &&\
+	flag_file=$${flag_dir}/$@ &&\
 	if [[ ! -e $${flag_file} ]]; then \
 	  sudo yum install -y epel-release &&\
 	  sudo yum -y update &&\
 	  sudo yum install -y libselinux-python python3 python3-pip jq sshpass &&\
 	  sudo su - root -c "pip3 install --upgrade pip" &&\
 	  sudo su - root -c "pip3 install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" &&\
+	  sudo mkdir -p $${flag_dir} &&\
 	  sudo touch $${flag_file}; \
 	else \
 	  echo "[SKIPPING linux-bootstrap] Found $(hostname):$${flag_file}"; \

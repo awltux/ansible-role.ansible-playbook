@@ -18,11 +18,12 @@ end
 # Each host calls this for each member of the cluster
 $network_config_linux = <<-ADD_NETWORK_CONFIG_LINUX_HEREDOC
 #!/bin/bash -eu
-debug=$1
+debug=${1:-false}
+
 echo "######################################################"
 echo "[Vagrantfile.network_config_linux]  $(whoami)@$(hostname)"
 echo "######################################################"
-if [[ $debug ]]; then
+if [[ ! "${debug}" == "false" ]]; then
 set -x
 fi
 
@@ -156,16 +157,21 @@ ADD_NETWORK_CONFIG_WIN10_HEREDOC
 # Enable password login to support kerberos login
 $host_config_linux = <<-HOST_CONFIG_LINUX_HEREDOC
 #!/bin/bash -eu
+debug=${1:-false}
+
 echo "######################################################"
 echo "[Vagrantfile.host_config_linux]  $(whoami)@$(hostname)"
 echo "######################################################"
+if [[ ! "${debug}" == "false" ]]; then
+set -x
+fi
 
-ansibleAccount=$1
-ansiblePassword=$2
-vaultPassword=$3
+ansibleAccount=$2
+ansiblePassword=$3
+vaultPassword=$4
 sshPrivateKeyString="#{ssh_prv_key}"
 
-if [[ $# -ne 3 ]]; then
+if [[ $# -ne 4 ]]; then
   echo "[ERROR] Invalid number of parameters for host_config_linux: $#"
   exit 1
 fi
@@ -205,9 +211,15 @@ authorizedKeys=${sshDir}/authorized_keys
 
 mkdir -p ${sshDir}
 
+# Don't echo the private key to console.
+set +x
 # Echo the ssh key loaded from windows into target system
 # Don't write it directly as it may already exist
 echo "${sshPrivateKeyString}" > ${tmpPrivateKey}
+if [[ ! "${debug}" == "false" ]]; then
+set -x
+fi
+
 chmod 600 ${tmpPrivateKey}
 
 # Extract public key from tmp private key
@@ -265,12 +277,12 @@ HOST_CONFIG_WIN10_HEREDOC
 # Cannot run as root because ansible isn't on the path for root.
 $run_ansible_playbook = <<-RUN_ANSIBLE_PLAYBOOK_HEREDOC
 #!/bin/bash -eu
-debug=$1
+debug=${1:-false}
 
 echo "######################################################"
 echo "[Vagrantfile.run_ansible_playbook] $(whoami)@$(hostname)"
 echo "######################################################"
-if [[ $debug ]]; then
+if [[ ! "${debug}" == "false" ]]; then
 set -x
 fi
 
@@ -284,13 +296,16 @@ if [[ $# -ne 4 ]]; then
 fi
 
 # Project directory has been copied to VM
-if [[ ! -e /etc/ansible/.bootstrapped ]]; then
-  echo "######################################################"
+if [[ ! -e /etc/ansible/linux-provisioner ]]; then
   echo "[Vagrantfile.run_ansible_playbook] Calling Makefile target: linux-provisioner"
-  sudo su - ${ansibleAccount} -c " ( cd /projects/${targetBaseName} && make env_name=vagrant debug=${debug} linux-provisioner ) || exit 1 "
+  sudo su - ${ansibleAccount} -c " ( \
+    cd /projects/${targetBaseName} &&\
+	make env_name=vagrant debug=${debug} linux-provisioner
+  ) || exit 1 "
+  sudo mkdir -p /etc/ansible
+  sudo touch /etc/ansible/linux-provisioner
 fi
 
-echo "######################################################"
 echo "[Vagrantfile.run_ansible_playbook] Calling Makefile target: ${targetOsFamily}-appliance"
 sudo su - ${ansibleAccount} -c "( cd /projects/${targetBaseName} && make env_name=vagrant debug=${debug} ${targetOsFamily}-appliance ) || exit 1"
 
@@ -362,7 +377,7 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
             # Call network configuration function for Windows (declared above)
             bash_shell.inline = $network_config_win10
           end
-          bash_shell.args = "#{debug} #{currentVmIp} #{targetHostName} #{targetNatIp} #{targetNatNetCidr} #{targetNatNetIp} #{targetNatNetMask} #{targetVmIp} #{ldapRealm}"
+          bash_shell.args = "'#{debug}' #{currentVmIp} #{targetHostName} #{targetNatIp} #{targetNatNetCidr} #{targetNatNetIp} #{targetNatNetMask} #{targetVmIp} #{ldapRealm}"
         end
       end
     end
@@ -381,7 +396,7 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
       escapedAnsiblePassword = Shellwords.escape(ansiblePassword)
       
       bash_shell.inline = $host_config_linux
-      bash_shell.args = "#{ansibleUsername} #{escapedAnsiblePassword} #{escapedVaultPassword}"
+      bash_shell.args = "'#{debug}' #{ansibleUsername} #{escapedAnsiblePassword} #{escapedVaultPassword}"
     else
       # TODO: Shouldn't assume Windows if not Linux!
       bash_shell.inline = $host_config_win10
@@ -394,8 +409,6 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
   provisionerHostnameBase = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['hostnameBase']
   provisionerAddrStart = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['addrStart']
   provisionerHostname = "#{provisionerHostnameBase}-#{provisionerAddrStart}"
-  puts "provisionerHostname=#{provisionerHostname}"
-  puts "currentHostName=#{currentHostName}"
   if provisionerHostname == currentHostName
     machine.vm.synced_folder ".", "/projects/#{appHostnameBase}", automount: true, mount_options: ["dmode=770,fmode=660"]
     machine.vm.provision  "shell" do |bash_shell|
