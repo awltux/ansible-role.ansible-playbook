@@ -1,4 +1,4 @@
-#!/bin/bash -eu
+#!/bin/bash -eux
 
 # Initialise an ansible-playbook project.
 playbook_name=$1
@@ -7,7 +7,7 @@ if [[ "" == "${playbook_name}" ]]; then
   exit 1
 fi
 
-if ! net session  1>NUL 2>NUL; then
+if ! net session >/dev/null; then
   echo "[ERROR] This script must be run as Administrator"
   exit 1
 fi
@@ -39,14 +39,34 @@ if [[ -e roles/${helperRoleName} ]]; then
 else
   echo "Add the helper submodule role: ${helperRoleName}"
   git submodule add https://github.com/awltux/${helperRoleName}.git roles/${helperRoleName};
+  git submodule init roles/${helperRoleName};
 fi
 
 templatesDir=roles/${helperRoleName}/templates/init
-cp --recursive --no-clobber ${templatesDir}/* .;
+echo "Copy the project files from: ${templatesDir}"
+cp --recursive --no-clobber ${templatesDir}/* ./;
 
-# Install choco
-"$(which powershell)" -NoProfile -InputFormat None -ExecutionPolicy Bypass \
-                          -Command "iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))"
-PATH="${PATH};${ALLUSERSPROFILE}\chocolatey\bin"
-# Use Choco to install tools required by this script.
-choco install -y vagrant virtualbox jq make
+if ! [ -x "$(command -v choco)" ]; then
+  echo "Install choco using powershell"
+  "$(which powershell)" -NoProfile -InputFormat None -ExecutionPolicy Bypass \
+                          -Command "[Net.ServicePointManager]::SecurityProtocol = \"tls12, tls11, tls\"; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))"
+fi
+
+PATH="${PATH};${ALLUSERSPROFILE}\\chocolatey\\bin"
+echo "Use Choco to install tools required by this script"
+if ! [ -x "$(command -v vagrant)" ]; then
+  echo "Install vagrant using powershell"
+  choco install -y vagrant
+fi
+if ! [ -x "$(command -v virtualbox)" ]; then
+  echo "Install virtualbox using powershell"
+  choco install -y  virtualbox  
+fi
+if ! [ -x "$(command -v jq)" ]; then
+  echo "Install jq using powershell"
+  choco install -y   jq 
+fi
+if ! [ -x "$(command -v make)" ]; then
+  echo "Install make using powershell"
+  choco install -y    make
+fi
