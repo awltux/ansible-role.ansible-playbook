@@ -182,7 +182,7 @@ homeDir="/home/${ansibleAccount}"
 if ! id -u ${ansibleAccount} > /dev/null 2>&1; then
   echo "[Vagrantfile.host_config_linux] USER: Create the ansible user '${ansibleAccount}' if it doesnt exist"
   # Allow ansibleAccount to sudo and access to vBox sharedfolders
-  useradd -g users -G wheel,vagrant -d ${homeDir} -s /bin/bash -p $(echo ${ansiblePassword} | openssl passwd -1 -stdin) ${ansibleAccount}
+  useradd -g users -G wheel,vagrant,vboxsf -d ${homeDir} -s /bin/bash -p $(echo ${ansiblePassword} | openssl passwd -1 -stdin) ${ansibleAccount}
 fi 
 # These are used by ansible build
 echo "${ansiblePassword}" > ${homeDir}/.ansible_password_file
@@ -443,10 +443,6 @@ def createCluster(clusterDetails, debug=false, vagrantCommand='default')
         if nodeGroup['hostnameArray'] and ((nodeGroup['hostnameArray']).length == nodeGroup['nodeCount'])
           currentNodeName = "#{nodeGroup['hostnameArray'][nodeIndex]}"
         end
-        currentNodeVersion = nodeGroup['imageVersion']
-        if nodeGroup['parentBuildNumber']
-          currentNodeVersion = nodeGroup['imageVersion'] + '.' + nodeGroup['parentBuildNumber']
-        end
         
         currentHostCidr = "#{clusterDetails['natNetBaseIp']}.#{nodeGroup['addrStart'] + nodeIndex}.0/#{clusterDetails['natNetCidrMask']}"
         currentVmIp = "#{clusterDetails['vmNetBaseIp']}.#{nodeGroup['addrStart'] + nodeIndex}"
@@ -454,7 +450,7 @@ def createCluster(clusterDetails, debug=false, vagrantCommand='default')
         
         config.vm.define "#{currentNodeName}" do |machine|
           machine.vm.box = nodeGroup['imageName']
-          machine.vm.box_version = currentNodeVersion
+          machine.vm.box_version = nodeGroup['imageVersion']
           machine.vm.hostname = currentNodeName
           # eth1: Create a nic to talk to other VMs
           machine.vm.network "private_network", ip: currentVmIp, :netmask => currentVmNetMask

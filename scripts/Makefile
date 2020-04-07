@@ -139,6 +139,7 @@ vagrant-up: load-node-data
 	echo "#################################################" &&\
 	echo "## Extracting SSH config to file: $(ssh_config_file)" &&\
 	echo "#################################################" &&\
+	mkdir -p target &&\
 	vagrant ssh-config $(provisioner_hostname) > $(ssh_config_file) \
 	) || exit 1
 
@@ -147,6 +148,7 @@ vagrant-up: load-node-data
 .PHONY: vagrant-reload
 vagrant-reload: load-node-data
 	$(quiet) time ( \
+	( if [[ ! -e $(ssh_config_file) ]]; then echo "Run 'make vagrant-up' to generate ssh connection file: $(ssh_config_file)" && exit 1; fi ) &&\
 	ssh -F $(ssh_config_file) $(provisioner_hostname) \
 	"if [[ ! -e /etc/ansible/linux-provisioner ]]; then \
 		sudo -u $(local_login) bash -c \
