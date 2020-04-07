@@ -240,7 +240,7 @@ linux-bootstrap:
 # The provisioner provides Docker and GECK so ansible must be run native on linux.
 .PHONY: linux-provisioner
 linux-provisioner: linux-bootstrap
-	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for provisioner " && \
+	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for provisioner: $${USER}" && \
 	export ANSIBLE_FORCE_COLOR=true && \
 	ansible-playbook \
 	--inventory $(inventory_file) \
