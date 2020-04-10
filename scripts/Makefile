@@ -239,7 +239,7 @@ linux-bootstrap:
 	fi \
 	) || exit 1
 
-# The provisioner provides Docker and GECK so ansible must be run native on linux.
+# Deploys provisioner specific changes using ansible
 .PHONY: linux-provisioner
 linux-provisioner: linux-bootstrap
 	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for provisioner: $${USER}" && \
@@ -251,7 +251,7 @@ linux-provisioner: linux-bootstrap
 	provisioner.playbook 2>&1 | tee $(log_dir)/$@.log ) || ( export RETURN_CODE=$$? && echo "$@ RC: $$RETURN_CODE"; exit $$RETURN_CODE )
 
   
-# Initialises a host before it has docker and geck installed
+# Deploys appliance specific changes using ansible
 .PHONY: linux-appliance
 linux-appliance:
 	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for appliance " && \
