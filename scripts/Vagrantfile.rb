@@ -148,6 +148,37 @@ New-NetFirewallRule -DisplayName "Allow inbound ICMPv6" -Direction Inbound -Prot
 
 ADD_NETWORK_CONFIG_WIN10_HEREDOC
 
+$ssh_fingerprint_config_linux = <<-SSH_FINGERPRINT_CONFIG_LINUX_HEREDOC
+#!/bin/bash -eu
+debug=${1:-false}
+
+echo "######################################################"
+echo "[Vagrantfile.ssh_fingerprint_config_linux]  $(whoami)@$(hostname)"
+echo "######################################################"
+if [[ ! "${debug}" == "false" ]]; then
+set -x
+fi
+
+ansibleAccount=$2
+targetHostname=$3
+
+if [[ $# -ne 3 ]]; then
+  echo "[ERROR] Invalid number of parameters for ssh_fingerprint_config_linux: $#"
+  exit 1
+fi
+
+homeDir="/home/${ansibleAccount}"
+knownHostsFile="${homeDir}/.ssh/known_hosts"
+targetIpAddress=$(getent hosts ${targetHostname} | cut -d' ' -f1)
+
+fingerprint_raw=$( ssh-keyscan -H ${targetHostname} | grep 'ecdsa-sha2' )
+fingerprint="${targetHostname},targetIpAddress $(echo $fingerprint_raw | cut -d' ' -f2-)"
+if [[ ! -e ${knownHostsFile} ]] || ( ! grep -q "${fingerprint}" ${knownHostsFile} ); then
+  echo "[INFO] Adding fingerprint for: ${ansibleAccount}@${targetHostname}:22"
+  echo "${fingerprint}" >> ${knownHostsFile}
+fi
+
+SSH_FINGERPRINT_CONFIG_LINUX_HEREDOC
 
 # Called from this.configureHost
 # Called once per host
@@ -347,6 +378,25 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
     machine.vm.network :forwarded_port, guest: 22, host: sshPortForwarded, id: "ssh"
   end
 
+  # Configure ALL hosts to support ansible connections.
+  # Before call to ssh_fingerprint_config_linux
+  machine.vm.provision  "shell" do |bash_shell|
+    if currentOsFamily == 'linux'
+      ansibleUsername = clusterDetails['localLogin']
+      # Dollars in passwords cause problems; escape them.
+      escapedVaultPassword = Shellwords.escape(vaultPassword)
+      escapedAnsiblePassword = Shellwords.escape(ansiblePassword)
+      
+      bash_shell.inline = $host_config_linux
+      bash_shell.args = "'#{debug}' #{ansibleUsername} #{escapedAnsiblePassword} #{escapedVaultPassword}"
+    else
+      # TODO: Shouldn't assume Windows if not Linux!
+      bash_shell.inline = $host_config_win10
+      bash_shell.privileged = false
+      bash_shell.args = "#{vmNetCidr}"
+    end
+  end
+
 
   targetOsFamily = ''
   appHostnameBase = ''
@@ -369,6 +419,17 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
       ldapRealm = "#{clusterDetails['ldapRealm']}"
       
       if targetHostName != currentHostName
+	    # Update the currentHostName ~/.ssh/known_hosts with fingerprint for targetHostName
+		# After call to host_config_linux
+        machine.vm.provision  "shell" do |bash_shell|
+          if currentOsFamily == 'linux'
+            # Call ssh known_hosts configuration function for linux (declared above)
+            bash_shell.inline = $ssh_fingerprint_config_linux
+          end
+          bash_shell.args = "'#{debug}' #{clusterDetails['localLogin']} #{targetHostName}"
+        end
+		
+		# Setup the hostnames and network routes to other hosts
         machine.vm.provision  "shell" do |bash_shell|
           if currentOsFamily == 'linux'
             # Call network configuration function for linux (declared above)
@@ -384,24 +445,6 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
     if targetNodeType['nodeGroup'] == 'appliance'
       targetOsFamily = targetNodeType['osFamily']
       appHostnameBase = targetNodeType['hostnameBase']
-    end
-  end
-
-  # Configure ALL hosts to support ansible connections.
-  machine.vm.provision  "shell" do |bash_shell|
-    if currentOsFamily == 'linux'
-      ansibleUsername = clusterDetails['localLogin']
-      # Dollars in passwords cause problems; escape them.
-      escapedVaultPassword = Shellwords.escape(vaultPassword)
-      escapedAnsiblePassword = Shellwords.escape(ansiblePassword)
-      
-      bash_shell.inline = $host_config_linux
-      bash_shell.args = "'#{debug}' #{ansibleUsername} #{escapedAnsiblePassword} #{escapedVaultPassword}"
-    else
-      # TODO: Shouldn't assume Windows if not Linux!
-      bash_shell.inline = $host_config_win10
-      bash_shell.privileged = false
-      bash_shell.args = "#{vmNetCidr}"
     end
   end
 
