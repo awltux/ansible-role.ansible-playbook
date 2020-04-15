@@ -9,18 +9,43 @@ endef
 ansible_version := 2.8.1
 
 # Make parameters
-debug ?= false
+debug ?= 0
 env_name ?= vagrant
 profile ?=
 project_name ?=
 log_dir ?= target
 ssh_config_file = target/ssh.config
 
+# FIXME: Has to be a better way!
 quiet := @
-ifneq ($(debug),false)
+ansible_debug :=
+ifneq ($(debug),0)
 ifneq ($(debug),)
-  $(info Debug output enabled)
+ifeq ($(debug),1)
+  $(info Debug output enabled at level $(debug))
   quiet :=
+  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+endif
+ifeq ($(debug),2)
+  $(info Debug output enabled at level $(debug))
+  quiet :=
+  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+endif
+ifeq ($(debug),3)
+  $(info Debug output enabled at level $(debug))
+  quiet :=
+  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+endif
+ifeq ($(debug),4)
+  $(info Debug output enabled at level $(debug))
+  quiet :=
+  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+endif
+ifeq ($(debug),5)
+  $(info Debug output enabled at level $(debug))
+  quiet :=
+  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+endif
 endif
 endif
 
@@ -135,7 +160,7 @@ vagrant-up: load-node-data
 	echo "#################################################" &&\
 	echo "## RUNNING VAGRANT UP" &&\
 	echo "#################################################" &&\
-	vagrant up &&\
+	debug=$(debug) vagrant up --provision &&\
 	echo "#################################################" &&\
 	echo "## Extracting SSH config to file: $(ssh_config_file)" &&\
 	echo "#################################################" &&\
@@ -167,7 +192,7 @@ vagrant-reload: load-node-data
 	echo "#################################################" &&\
 	echo "## Running 'vagrant reload --provision $(provisioner_hostname)" &&\
 	echo "#################################################" &&\
-	vagrant reload --provision $(provisioner_hostname) \
+	debug=$(debug) vagrant reload --provision $(provisioner_hostname) \
 	) || exit 1
 
 # Setup ssh certs and ansible on the provisioner
@@ -178,7 +203,7 @@ ansible-setup:
 
 # Run ansible on the provisioner
 .PHONY: ansible-deploy
-ansible-deploy:
+ansible-deploy: linux-appliance
 	$(quiet):
 
 .PHONY: molecule-test
@@ -244,7 +269,7 @@ linux-bootstrap:
 linux-provisioner: linux-bootstrap
 	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for provisioner: $${USER}" && \
 	export ANSIBLE_FORCE_COLOR=true && \
-	ansible-playbook \
+	ansible-playbook $(ansible_debug) \
 	--inventory $(inventory_file) \
 	--vault-id=$(vault_password_file) \
 	-e env_name="$(env_name)" \
@@ -256,7 +281,7 @@ linux-provisioner: linux-bootstrap
 linux-appliance:
 	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for appliance " && \
 	export ANSIBLE_FORCE_COLOR=true && \
-	ansible-playbook \
+	ansible-playbook $(ansible_debug) \
 	--inventory $(inventory_file) \
 	--vault-id=$(vault_password_file) \
 	-e env_name="$(env_name)" \
