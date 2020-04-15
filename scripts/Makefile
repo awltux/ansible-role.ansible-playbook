@@ -259,8 +259,6 @@ linux-bootstrap:
 	  sudo su - root -c "pip3 install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" &&\
 	  sudo mkdir -p $${flag_dir} &&\
 	  sudo touch $${flag_file}; \
-	else \
-	  echo "[SKIPPING linux-bootstrap] Found $(hostname):$${flag_file}"; \
 	fi \
 	) || exit 1
 

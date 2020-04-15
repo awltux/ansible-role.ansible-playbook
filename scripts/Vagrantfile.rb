@@ -335,6 +335,8 @@ if [[ ! -e /etc/ansible/linux-provisioner ]]; then
   ) || exit 1 "
   sudo mkdir -p /etc/ansible
   sudo touch /etc/ansible/linux-provisioner
+else
+  echo "[SKIPPING linux-provisioner] Found $(hostname):/etc/ansible/linux-provisioner"; \
 fi
 
 echo "[Vagrantfile.run_ansible_playbook] Calling Makefile target: ${targetOsFamily}-appliance"
