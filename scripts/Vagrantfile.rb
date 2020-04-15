@@ -419,16 +419,6 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
       ldapRealm = "#{clusterDetails['ldapRealm']}"
       
       if targetHostName != currentHostName
-	    # Update the currentHostName ~/.ssh/known_hosts with fingerprint for targetHostName
-		# After call to host_config_linux
-        machine.vm.provision  "shell" do |bash_shell|
-          if currentOsFamily == 'linux'
-            # Call ssh known_hosts configuration function for linux (declared above)
-            bash_shell.inline = $ssh_fingerprint_config_linux
-          end
-          bash_shell.args = "'#{debug}' #{clusterDetails['localLogin']} #{targetHostName}"
-        end
-		
 		# Setup the hostnames and network routes to other hosts
         machine.vm.provision  "shell" do |bash_shell|
           if currentOsFamily == 'linux'
@@ -453,12 +443,41 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
   provisionerAddrStart = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['addrStart']
   provisionerHostname = "#{provisionerHostnameBase}-#{provisionerAddrStart}"
   if provisionerHostname == currentHostName
+    #Can't request host fingerprint until all other hosts have been created.
+    clusterDetails['nodeGroups'].each do |nodeGroup|
+      (0..nodeGroup['nodeCount']-1).each do |nodeIndex|
+        currentNodeIndex= nodeGroup['addrStart'] + nodeIndex
+        currentNodeName = "#{nodeGroup['hostnameBase']}-#{currentNodeIndex}"
+
+        # Loop over all targets for the currentNode
+        clusterDetails['nodeGroups'].each do |targetNodeType|
+          (0..targetNodeType['nodeCount']-1).each do |targetNodeIndex|
+            targetHostName = "#{targetNodeType['hostnameBase']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
+             if targetHostName != currentNodeName
+               # Update the currentHostName ~/.ssh/known_hosts with fingerprint for targetHostName
+               # After call to host_config_linux
+               machine.vm.provision  "shell" do |bash_shell|
+                 if currentOsFamily == 'linux'
+                   # Call ssh known_hosts configuration function for linux (declared above)
+                   bash_shell.inline = $ssh_fingerprint_config_linux
+                 end
+                 bash_shell.args = "'#{debug}' #{clusterDetails['localLogin']} #{targetHostName}"
+               end
+            end
+          end
+        end
+
+      end
+    end
+    
+    # Now run ansible playbook
     machine.vm.synced_folder ".", "/projects/#{appHostnameBase}", automount: true, mount_options: ["dmode=770,fmode=660"]
     machine.vm.provision  "shell" do |bash_shell|
       bash_shell.inline = $run_ansible_playbook
       bash_shell.privileged = false
       bash_shell.args = "'#{debug}' #{clusterDetails['localLogin']} '#{appHostnameBase}' '#{targetOsFamily}'"
     end
+    
   end
 
 end
@@ -506,11 +525,13 @@ def createCluster(clusterDetails, debug=false, vagrantCommand='default')
             #       Otherwise vagrant would make all nodes 10.0.2.15, which confuses kubeadm
             provider_vm.customize ['modifyvm',:id, '--natnet1', "#{currentHostCidr}"]
           end
-          # Clean VM has been created, now run ansible configuration on it.
+          # Clean VM has been created, now configuration it. 
+          # Last host to be created should always the provisioner, which runs the ansible playbook
           configureHost(debug, nodeGroup, machine, clusterDetails, currentNodeName, currentVmIp, ansible_password, vault_password, currentNodeIndex)
         end
       end
     end
+
+
   end
-  
 end
