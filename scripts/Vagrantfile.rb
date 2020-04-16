@@ -18,12 +18,12 @@ end
 # Each host calls this for each member of the cluster
 $network_config_linux = <<-ADD_NETWORK_CONFIG_LINUX_HEREDOC
 #!/bin/bash -eu
-debug=${1:-false}
+debug=${1:-0}
 
 echo "######################################################"
 echo "[Vagrantfile.network_config_linux]  $(whoami)@$(hostname)"
 echo "######################################################"
-if [[ ! "${debug}" == "false" ]]; then
+if [[ ! "${debug}" == "0" ]]; then
 set -x
 fi
 
@@ -150,12 +150,12 @@ ADD_NETWORK_CONFIG_WIN10_HEREDOC
 
 $ssh_fingerprint_config_linux = <<-SSH_FINGERPRINT_CONFIG_LINUX_HEREDOC
 #!/bin/bash -eu
-debug=${1:-false}
+debug=${1:-0}
 
 echo "######################################################"
 echo "[Vagrantfile.ssh_fingerprint_config_linux]  $(whoami)@$(hostname)"
 echo "######################################################"
-if [[ ! "${debug}" == "false" ]]; then
+if [[ ! "${debug}" == "0" ]]; then
 set -x
 fi
 
@@ -188,12 +188,12 @@ SSH_FINGERPRINT_CONFIG_LINUX_HEREDOC
 # Enable password login to support kerberos login
 $host_config_linux = <<-HOST_CONFIG_LINUX_HEREDOC
 #!/bin/bash -eu
-debug=${1:-false}
+debug=${1:-0}
 
 echo "######################################################"
 echo "[Vagrantfile.host_config_linux]  $(whoami)@$(hostname)"
 echo "######################################################"
-if [[ ! "${debug}" == "false" ]]; then
+if [[ ! "${debug}" == "0" ]]; then
 set -x
 fi
 
@@ -247,7 +247,7 @@ set +x
 # Echo the ssh key loaded from windows into target system
 # Don't write it directly as it may already exist
 echo "${sshPrivateKeyString}" > ${tmpPrivateKey}
-if [[ ! "${debug}" == "false" ]]; then
+if [[ ! "${debug}" == "0" ]]; then
 set -x
 fi
 
@@ -308,20 +308,21 @@ HOST_CONFIG_WIN10_HEREDOC
 # Cannot run as root because ansible isn't on the path for root.
 $run_ansible_playbook = <<-RUN_ANSIBLE_PLAYBOOK_HEREDOC
 #!/bin/bash -eu
-debug=${1:-false}
+debug=${1:-0}
 
 echo "######################################################"
 echo "[Vagrantfile.run_ansible_playbook] $(whoami)@$(hostname)"
 echo "######################################################"
-if [[ ! "${debug}" == "false" ]]; then
+if [[ ! "${debug}" == "0" ]]; then
 set -x
 fi
 
-ansibleAccount=$2
-targetBaseName=$3
-targetOsFamily=$4
+env_name=$2
+ansibleAccount=$3
+targetBaseName=$4
+targetOsFamily=$5
 
-if [[ $# -ne 4 ]]; then
+if [[ $# -ne 5 ]]; then
   echo "[ERROR] Invalid paramter count: $($args.count)"
   exit 1
 fi
@@ -331,7 +332,7 @@ if [[ ! -e /etc/ansible/linux-provisioner ]]; then
   echo "[Vagrantfile.run_ansible_playbook] Calling Makefile target: linux-provisioner"
   sudo su - ${ansibleAccount} -c " ( \
     cd /projects/${targetBaseName} &&\
-	make env_name=vagrant debug=${debug} linux-provisioner
+	make env_name=${env_name} debug=${debug} linux-provisioner
   ) || exit 1 "
   sudo mkdir -p /etc/ansible
   sudo touch /etc/ansible/linux-provisioner
@@ -340,14 +341,14 @@ else
 fi
 
 echo "[Vagrantfile.run_ansible_playbook] Calling Makefile target: ${targetOsFamily}-appliance"
-sudo su - ${ansibleAccount} -c "( cd /projects/${targetBaseName} && make env_name=vagrant debug=${debug} ${targetOsFamily}-appliance ) || exit 1"
+sudo su - ${ansibleAccount} -c "( cd /projects/${targetBaseName} && make env_name=${env_name} debug=${debug} ${targetOsFamily}-appliance ) || exit 1"
 
 RUN_ANSIBLE_PLAYBOOK_HEREDOC
 
 
 # Called from this.createCluster()
 # Runs the ansible configuration scripts on the VM
-def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, currentVmIp, ansiblePassword, vaultPassword, currentNodeIndex)
+def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHostName, currentVmIp, ansiblePassword, vaultPassword, currentNodeIndex)
   vmNetCidr = "#{clusterDetails['vmNetBaseIp']}.0/24"
   currentOsFamily = nodeGroup['osFamily']
   # Allows all machines to support ssh login from Virtualbox host
@@ -477,7 +478,7 @@ def configureHost(debug, nodeGroup, machine, clusterDetails, currentHostName, cu
     machine.vm.provision  "shell" do |bash_shell|
       bash_shell.inline = $run_ansible_playbook
       bash_shell.privileged = false
-      bash_shell.args = "'#{debug}' #{clusterDetails['localLogin']} '#{appHostnameBase}' '#{targetOsFamily}'"
+      bash_shell.args = "'#{debug}' #{env_name} #{clusterDetails['localLogin']} '#{appHostnameBase}' '#{targetOsFamily}'"
     end
     
   end
@@ -486,7 +487,7 @@ end
 
 # Called from project ../../Vagrantfile
 # Create a VM for each node declared by clusterDetails.nodeGroups (normally just a provisioner and an appliance )
-def createCluster(clusterDetails, debug=false, vagrantCommand='default')
+def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagrantCommand='default')
   vault_password   = File.read( ENV['HOME'] + "/.vault_password_file")
   ansible_password = File.read( ENV['HOME'] + "/.ansible_password_file")
   
@@ -529,7 +530,7 @@ def createCluster(clusterDetails, debug=false, vagrantCommand='default')
           end
           # Clean VM has been created, now configuration it. 
           # Last host to be created should always the provisioner, which runs the ansible playbook
-          configureHost(debug, nodeGroup, machine, clusterDetails, currentNodeName, currentVmIp, ansible_password, vault_password, currentNodeIndex)
+          configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentNodeName, currentVmIp, ansible_password, vault_password, currentNodeIndex)
         end
       end
     end

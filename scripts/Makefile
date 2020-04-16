@@ -10,7 +10,7 @@ ansible_version := 2.8.1
 
 # Make parameters
 debug ?= 0
-env_name ?= vagrant
+env_name ?= vagrant-virtualbox
 profile ?=
 project_name ?=
 log_dir ?= target
@@ -53,8 +53,9 @@ _project_name = $(shell basename $$(pwd))
 ifneq ($(project_name),)
 _project_name = $(project_name)
 endif
-$(info project_name = $(_project_name) )
 
+$(info debug=$(debug) )
+$(info project_name=$(_project_name) )
 $(info env_name=$(env_name))
 
 cluster_details_file ?= environments/$(env_name)/environment.json
@@ -151,21 +152,21 @@ validate-profile:
 .PHONY: vagrant-up
 vagrant-up: load-node-data
 	$(quiet) time ( \
-	if ! (vagrant plugin list | grep -q vagrant-vbguest); then \
+	if ! (env_name=$(env_name) vagrant plugin list | grep -q vagrant-vbguest); then \
 	  echo "#################################################" &&\
 	  echo "## INSTALL VAGRANT PLUGIN: VirtualBox Guest installer" &&\
 	  echo "#################################################" &&\
-	  vagrant plugin install vagrant-vbguest; \
+	  env_name=$(env_name) vagrant plugin install vagrant-vbguest; \
 	fi &&\
 	echo "#################################################" &&\
 	echo "## RUNNING VAGRANT UP" &&\
 	echo "#################################################" &&\
-	debug=$(debug) vagrant up --provision &&\
+	debug=$(debug) env_name=$(env_name) vagrant up --provision &&\
 	echo "#################################################" &&\
 	echo "## Extracting SSH config to file: $(ssh_config_file)" &&\
 	echo "#################################################" &&\
 	mkdir -p target &&\
-	vagrant ssh-config $(provisioner_hostname) > $(ssh_config_file) \
+	env_name=$(env_name) vagrant ssh-config $(provisioner_hostname) > $(ssh_config_file) \
 	) || exit 1
 
 # Run just the ansible provisioning on the jumpbox VM
@@ -192,7 +193,7 @@ vagrant-reload: load-node-data
 	echo "#################################################" &&\
 	echo "## Running 'vagrant reload --provision $(provisioner_hostname)" &&\
 	echo "#################################################" &&\
-	debug=$(debug) vagrant reload --provision $(provisioner_hostname) \
+	debug=$(debug) env_name=$(env_name) vagrant reload --provision $(provisioner_hostname) \
 	) || exit 1
 
 # Setup ssh certs and ansible on the provisioner
