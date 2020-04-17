@@ -109,11 +109,11 @@ load-node-data:
 ifneq (,$(shell which jq))
 local_login          := $(shell jq '.localLogin' $(cluster_details_file) | sed 's/\"//g')
 # PROVISIONER CONFIG
-prov_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .hostnameBase?' $(cluster_details_file) | sed 's/\"//g' )
+prov_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName??' $(cluster_details_file) | sed 's/\"//g' )
 prov_addr_start      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(cluster_details_file) | sed 's/\"//g' )
 provisioner_hostname := $(prov_hostname_base)-$(prov_addr_start)
 # APPLIANCE CONFIG
-app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .hostnameBase?' $(cluster_details_file) | sed 's/\"//g' )
+app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageName??' $(cluster_details_file) | sed 's/\"//g' )
 app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(cluster_details_file) | sed 's/\"//g' )
 app_node_count       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(cluster_details_file) | sed 's/\"//g' )
 endif

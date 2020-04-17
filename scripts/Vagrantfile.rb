@@ -408,7 +408,7 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
   # This is primarily because Vagrant hihacks eth0 for NAT connections.
   clusterDetails['nodeGroups'].each do |targetNodeType|
     (0..targetNodeType['nodeCount']-1).each do |targetNodeIndex|
-      targetHostName = "#{targetNodeType['hostnameBase']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
+      targetHostName = "#{targetNodeType['images'][0]['imageName']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
       if targetNodeType['hostnameArray'] and ((targetNodeType['hostnameArray']).length == targetNodeType['nodeCount'])
         targetHostName = "#{targetNodeType['hostnameArray'][targetNodeIndex]}"
       end
@@ -437,12 +437,12 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
     end
     if targetNodeType['nodeGroup'] == 'appliance'
       targetOsFamily = targetNodeType['osFamily']
-      appHostnameBase = targetNodeType['hostnameBase']
+      appHostnameBase = targetNodeType['images'][0]['imageName']
     end
   end
 
   # Only the provisioner runs ansible
-  provisionerHostnameBase = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['hostnameBase']
+  provisionerHostnameBase = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['images'][0]['imageName']
   provisionerAddrStart = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['addrStart']
   provisionerHostname = "#{provisionerHostnameBase}-#{provisionerAddrStart}"
   if provisionerHostname == currentHostName
@@ -450,12 +450,12 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
     clusterDetails['nodeGroups'].each do |nodeGroup|
       (0..nodeGroup['nodeCount']-1).each do |nodeIndex|
         currentNodeIndex= nodeGroup['addrStart'] + nodeIndex
-        currentNodeName = "#{nodeGroup['hostnameBase']}-#{currentNodeIndex}"
+        currentNodeName = "#{nodeGroup['images'][0]['imageName']}-#{currentNodeIndex}"
 
         # Loop over all targets for the currentNode
         clusterDetails['nodeGroups'].each do |targetNodeType|
           (0..targetNodeType['nodeCount']-1).each do |targetNodeIndex|
-            targetHostName = "#{targetNodeType['hostnameBase']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
+            targetHostName = "#{targetNodeType['images'][0]['imageName']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
              if targetHostName != currentNodeName
                # Update the currentHostName ~/.ssh/known_hosts with fingerprint for targetHostName
                # After call to host_config_linux
@@ -504,7 +504,7 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
     clusterDetails['nodeGroups'].each do |nodeGroup|
       (0..nodeGroup['nodeCount']-1).each do |nodeIndex|
         currentNodeIndex= nodeGroup['addrStart'] + nodeIndex
-        currentNodeName = "#{nodeGroup['hostnameBase']}-#{currentNodeIndex}"
+        currentNodeName = "#{nodeGroup['images'][0]['imageName']}-#{currentNodeIndex}"
         if nodeGroup['hostnameArray'] and ((nodeGroup['hostnameArray']).length == nodeGroup['nodeCount'])
           currentNodeName = "#{nodeGroup['hostnameArray'][nodeIndex]}"
         end
