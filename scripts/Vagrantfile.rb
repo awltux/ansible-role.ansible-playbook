@@ -501,6 +501,8 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
     config.ssh.insert_key = false
     # forward ssh agent to easily ssh into the different machines
     config.ssh.forward_agent = true
+    # Ensure the MAC address is unique
+    config.vm.base_mac = nil
 
     clusterDetails['nodeGroups'].each do |nodeGroup|
       (0..nodeGroup['nodeCount']-1).each do |nodeIndex|
