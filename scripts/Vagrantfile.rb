@@ -408,6 +408,7 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
   # This is primarily because Vagrant hihacks eth0 for NAT connections.
   clusterDetails['nodeGroups'].each do |targetNodeType|
     (0..targetNodeType['nodeCount']-1).each do |targetNodeIndex|
+      
       targetHostName = "#{targetNodeType['images'][0]['imageName']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
       if targetNodeType['hostnameArray'] and ((targetNodeType['hostnameArray']).length == targetNodeType['nodeCount'])
         targetHostName = "#{targetNodeType['hostnameArray'][targetNodeIndex]}"
@@ -514,8 +515,8 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
         currentVmNetMask = "255.255.255.0"
         
         config.vm.define "#{currentNodeName}" do |machine|
-          machine.vm.box = nodeGroup['imageName']
-          machine.vm.box_version = nodeGroup['imageVersion']
+          machine.vm.box = nodeGroup['images'][0]['imageName']
+          machine.vm.box_version = nodeGroup['images'][0]['imageVersion']
           machine.vm.hostname = currentNodeName
           # eth1: Create a nic to talk to other VMs
           machine.vm.network "private_network", ip: currentVmIp, :netmask => currentVmNetMask

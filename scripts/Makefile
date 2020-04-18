@@ -11,6 +11,7 @@ ansible_version := 2.8.1
 # Make parameters
 debug ?= 0
 env_name ?= vagrant-virtualbox
+vagrant_node_group ?= appliance
 profile ?=
 project_name ?=
 log_dir ?= target
@@ -19,32 +20,38 @@ ssh_config_file = target/ssh.config
 # FIXME: Has to be a better way!
 quiet := @
 ansible_debug :=
+VAGRANT_LOG=
 ifneq ($(debug),0)
 ifneq ($(debug),)
 ifeq ($(debug),1)
   $(info Debug output enabled at level $(debug))
   quiet :=
   ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+  VAGRANT_LOG=error
 endif
 ifeq ($(debug),2)
   $(info Debug output enabled at level $(debug))
   quiet :=
   ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+  VAGRANT_LOG=warn
 endif
 ifeq ($(debug),3)
   $(info Debug output enabled at level $(debug))
   quiet :=
   ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+  VAGRANT_LOG=info
 endif
 ifeq ($(debug),4)
   $(info Debug output enabled at level $(debug))
   quiet :=
   ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+  VAGRANT_LOG=info
 endif
 ifeq ($(debug),5)
   $(info Debug output enabled at level $(debug))
   quiet :=
   ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
+  VAGRANT_LOG=debug
 endif
 endif
 endif
@@ -108,6 +115,7 @@ load-node-data:
 # The jq app may not have been installed yet
 ifneq (,$(shell which jq))
 local_login          := $(shell jq '.localLogin' $(cluster_details_file) | sed 's/\"//g')
+vm_provider          := $(shell jq '.vmProvider' $(cluster_details_file) | sed 's/\"//g')
 # PROVISIONER CONFIG
 prov_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName??' $(cluster_details_file) | sed 's/\"//g' )
 prov_addr_start      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(cluster_details_file) | sed 's/\"//g' )
@@ -116,6 +124,7 @@ prov_hostname        := $(prov_hostname_base)-$(prov_addr_start)
 app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageName??' $(cluster_details_file) | sed 's/\"//g' )
 app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(cluster_details_file) | sed 's/\"//g' )
 app_node_count       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(cluster_details_file) | sed 's/\"//g' )
+app_hostname        := $(app_hostname_base)-$(app_addr_start)
 endif
 
 # Validate that the env_name property is defined and points to a valid environment file.
@@ -161,12 +170,12 @@ vagrant-up: load-node-data
 	echo "#################################################" &&\
 	echo "## RUNNING VAGRANT UP" &&\
 	echo "#################################################" &&\
-	debug=$(debug) env_name=$(env_name) vagrant up --provision &&\
+	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant up --provision &&\
 	echo "#################################################" &&\
 	echo "## Extracting SSH config to file: $(ssh_config_file)" &&\
 	echo "#################################################" &&\
 	mkdir -p target &&\
-	env_name=$(env_name) vagrant ssh-config $(prov_hostname) > $(ssh_config_file) \
+	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant ssh-config $(prov_hostname) > $(ssh_config_file) \
 	) || exit 1
 
 # Run just the ansible provisioning on the jumpbox VM
@@ -193,11 +202,11 @@ vagrant-reload: load-node-data
 	echo "#################################################" &&\
 	echo "## Running 'vagrant reload --provision $(prov_hostname)" &&\
 	echo "#################################################" &&\
-	debug=$(debug) env_name=$(env_name) vagrant reload --provision $(prov_hostname) \
+	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload --provision $(prov_hostname) \
 	) || exit 1
 
 .PHONY: vagrant-box-setup
-vagrant-box-setup:
+vagrant-box-setup: load-node-data
 BUILD_NUMBER ?= 0
 # SETUP FOR VAGRANT_UPLOAD
 artifactory_base_url := artifactory.local.example.com/artifactory
@@ -206,7 +215,7 @@ vagrant_api_url := $(artifactory_base_url)/api/vagrant
 vagrant_server_url := https://$(vagrant_api_url)/vagrant-local
 vagrant_auth_url := $(vagrant_api_url)/auth
 # SETUP FOR vagrant-box-upload and vagrant-box-download
-ifeq ($(VAGRANT_MACHINE_TYPE),appliance)
+ifeq ($(vagrant_node_group),appliance)
   vagrant_upload_url := https://$(vagrant_repo_url)/boxes/$(app_hostname_base)/versions/$(app_build_version)/providers/$(vm_provider).box
   vagrant_download_url := https://$(vagrant_repo_url)/boxes/$(app_image_name)/versions/$(app_image_version)/providers/$(vm_provider).box
   image_name := $(app_image_name)
@@ -248,29 +257,29 @@ endif
 .PHONY: vagrant-box-package
 vagrant-box-package:  vagrant-box-setup vagrant-bootstrap-check
 ifndef hostname_base
-	$(error VAGRANT_MACHINE_TYPE=$(VAGRANT_MACHINE_TYPE) results in an empty hostname_base)
+	$(error vagrant_node_group=$(vagrant_node_group) results in an empty hostname_base)
 endif
-	$(HIDE_CMD) VAGRANT_BOX_NAME=$(hostname_base)-$(vm_provider)-0.box &&\
+	$(HIDE_CMD) set -x && VAGRANT_BOX_NAME=$(hostname_base)-$(vm_provider)-0.box &&\
 	rm -f target/$${VAGRANT_BOX_NAME} &&\
-	echo "$(VAGRANT_MACHINE_TYPE): Packaging vagrant box: $(vm_hostname) --> target/$${VAGRANT_BOX_NAME}" &&\
-	vagrant package --output target/$${VAGRANT_BOX_NAME} $(vm_hostname)
+	echo "$(vagrant_node_group): Packaging vagrant box: $(vm_hostname) --> target/$${VAGRANT_BOX_NAME}" &&\
+	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant package --output target/$${VAGRANT_BOX_NAME} $(vm_hostname)
 	
 # DEVELOPMENT: Add a vagrant box package to the local vagrant cache
 # Used by make targets: vagrant-box-cache
 .PHONY: vagrant-box-add
 vagrant-box-add:  vagrant-box-setup vagrant-bootstrap-check
 ifndef hostname_base
-	$(error VAGRANT_MACHINE_TYPE=$(VAGRANT_MACHINE_TYPE) results in an empty hostname_base)
+	$(error vagrant_node_group=$(vagrant_node_group) results in an empty hostname_base)
 endif
 ifneq (,$(image_name))
 	$(HIDE_CMD) VAGRANT_BOX_NAME=$(hostname_base)-$(vm_provider)-0.box &&\
 	INSTALLED_BOX_COUNT=`vagrant box list | grep "$(hostname_base).*($(vm_provider), 0)" | wc -l` &&\
 	if [[ $${INSTALLED_BOX_COUNT} -eq 0 ]]; then \
-		echo "$(VAGRANT_MACHINE_TYPE): Adding the vagrant box image: $(hostname_base):0" &&\
-		vagrant box add --name $(hostname_base) target/$${VAGRANT_BOX_NAME} ; \
+		echo "$(vagrant_node_group): Adding the vagrant box image: $(hostname_base):0" &&\
+		env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant box add --name $(hostname_base) target/$${VAGRANT_BOX_NAME} ; \
 	else \
-		echo "$(VAGRANT_MACHINE_TYPE): Found cached Vagrant box image for the $(VAGRANT_MACHINE_TYPE): $(hostname_base):0" &&\
-		echo "$(VAGRANT_MACHINE_TYPE): To remove cached Vagrant box image: vagrant box remove --box-version 0 --provider $(vm_provider) $(hostname_base)" &&\
+		echo "$(vagrant_node_group): Found cached Vagrant box image for the $(vagrant_node_group): $(hostname_base):0" &&\
+		echo "$(vagrant_node_group): To remove cached Vagrant box image: vagrant box remove --box-version 0 --provider $(vm_provider) $(hostname_base)" &&\
 		exit 1; \
 	fi
 endif
@@ -278,7 +287,7 @@ endif
 # DEVELOPMENT: Add a vagrant box package to the local vagrant cache
 .PHONY: vagrant-box-cache
 vagrant-box-cache:  vagrant-box-setup vagrant-bootstrap-check vagrant-box-package vagrant-box-add
-	$(HIDE_CMD)echo "$(VAGRANT_MACHINE_TYPE): Cached Vagrant box image for $(VAGRANT_MACHINE_TYPE): $(hostname_base):0"; \
+	 $(HIDE_CMD)echo "$(vagrant_node_group): Cached Vagrant box image: $(hostname_base):0"; \
 
 # Download parent vagrant box from the artifactory vagrant repo
 .PHONY: vagrant-box-download
@@ -294,9 +303,9 @@ ifneq (,$(app_image_name))
 		VAGRANT_BOX_URL="$(vagrant_server_url)/$(app_image_name)" &&\
 		VAGRANT_SERVER_URL=$(vagrant_server_url) \
 		ATLAS_TOKEN=`curl -s https://$${USER_LOGIN}:$${USER_PASSWORD}@$(vagrant_auth_url)` \
-		vagrant box add --name $(app_image_name) --box-version $(app_image_version) $${VAGRANT_BOX_URL}; \
+		env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant box add --name $(app_image_name) --box-version $(app_image_version) $${VAGRANT_BOX_URL}; \
 	else \
-		echo "APPLIANCE: Found cached Vagrant box image for the $(VAGRANT_MACHINE_TYPE): $(app_image_name):$(app_image_version)"; \
+		echo "APPLIANCE: Found cached Vagrant box image for the $(vagrant_node_group): $(app_image_name):$(app_image_version)"; \
 	fi
 endif
 ifneq (,$(pro_image_name))
@@ -310,9 +319,9 @@ ifneq (,$(pro_image_name))
 		VAGRANT_BOX_URL="$(vagrant_server_url)/$(pro_image_name)" &&\
 		VAGRANT_SERVER_URL=$(vagrant_server_url) \
 		ATLAS_TOKEN=`curl -s https://$${USER_LOGIN}:$${USER_PASSWORD}@$(vagrant_auth_url)` \
-		vagrant box add --name $(pro_image_name) --box-version $(pro_image_version) $${VAGRANT_BOX_URL}; \
+		env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant box add --name $(pro_image_name) --box-version $(pro_image_version) $${VAGRANT_BOX_URL}; \
 	else \
-		echo "PROVISIONER: Found cached Vagrant box image for the $(VAGRANT_MACHINE_TYPE): $(pro_image_name):$(pro_image_version)"; \
+		echo "PROVISIONER: Found cached Vagrant box image for the $(vagrant_node_group): $(pro_image_name):$(pro_image_version)"; \
 	fi
 endif
 	
