@@ -12,65 +12,63 @@ ansible_version := 2.8.1
 debug ?= 0
 env_name ?= vagrant-virtualbox
 vagrant_node_group ?= appliance
+# These variables can be used to build from a specific Vagrant image.
+# e.g. from the previous production build to test for upgrade issues.
+app_image_name ?= 
+app_image_version ?=
+
+# A profile can define a particular setup e.g. ansible tags, updates etc.
 profile ?=
-project_name ?=
+
+# Location to keep the log files
 log_dir ?= target
+
+# Store ssh config details (generated during vagarnt-up) used by vagrant-reload to speed up connections
 ssh_config_file = target/ssh.config
 
-# FIXME: Has to be a better way!
 quiet := @
 ansible_debug :=
-VAGRANT_LOG=
+VAGRANT_LOG :=
 ifneq ($(debug),0)
 ifneq ($(debug),)
+$(info Debug output enabled at level $(debug))
+# create the verbose flag for the ansible command
+ansible_debug = -$(shell printf "%0.sv" {1..$(debug)} )
+quiet =
 ifeq ($(debug),1)
-  $(info Debug output enabled at level $(debug))
-  quiet :=
-  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
   VAGRANT_LOG=error
 endif
 ifeq ($(debug),2)
-  $(info Debug output enabled at level $(debug))
-  quiet :=
-  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
   VAGRANT_LOG=warn
 endif
 ifeq ($(debug),3)
-  $(info Debug output enabled at level $(debug))
-  quiet :=
-  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
   VAGRANT_LOG=info
 endif
 ifeq ($(debug),4)
-  $(info Debug output enabled at level $(debug))
-  quiet :=
-  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
   VAGRANT_LOG=info
 endif
 ifeq ($(debug),5)
-  $(info Debug output enabled at level $(debug))
-  quiet :=
-  ansible_debug := -$(shell printf "%0.sv" {1..$(debug)} )
   VAGRANT_LOG=debug
 endif
 endif
 endif
 
+# Only used with project-init to identify the project directory name.
+project_name ?=
 _project_name = $(shell basename $$(pwd))
 ifneq ($(project_name),)
 _project_name = $(project_name)
 endif
-
-$(info debug=$(debug) )
 $(info project_name=$(_project_name) )
-$(info env_name=$(env_name))
 
-cluster_details_file ?= environments/$(env_name)/environment.json
+environments_file ?= environments/$(env_name)/environment.json
 ifneq ($(shell test -e environments/$(env_name)/environment.json && echo -n yes),yes)
-cluster_details_file ?= environments/environment.json
+environments_file ?= environments/environment.json
 endif
-$(info cluster_details_file=$(cluster_details_file))
+$(info environments_file=$(environments_file))
+
 inventory_file ?= environments/$(env_name)/inventory.ini
+$(info Ansible inventory_file=$(inventory_file))
 
 # Use password files in home before target
 # If target/.vault_password_file is part if a mounted folder 
@@ -114,17 +112,28 @@ mkdir_target:
 load-node-data:
 # The jq app may not have been installed yet
 ifneq (,$(shell which jq))
-local_login          := $(shell jq '.localLogin' $(cluster_details_file) | sed 's/\"//g')
-vm_provider          := $(shell jq '.vmProvider' $(cluster_details_file) | sed 's/\"//g')
+local_login          := $(shell jq '.localLogin' $(environments_file) | sed 's/\"//g')
+vm_provider          := $(shell jq '.vmProvider' $(environments_file) | sed 's/\"//g')
 # PROVISIONER CONFIG
-prov_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName??' $(cluster_details_file) | sed 's/\"//g' )
-prov_addr_start      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(cluster_details_file) | sed 's/\"//g' )
+prov_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
+prov_addr_start      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(environments_file) | sed 's/\"//g' )
 prov_hostname        := $(prov_hostname_base)-$(prov_addr_start)
+prov_image_name      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
+prov_image_version   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageVersion?' $(environments_file) | sed 's/\"//g' )
+#prov_build_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .buildVersion?' $(environments_file) | sed 's/\"//g' )
 # APPLIANCE CONFIG
-app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageName??' $(cluster_details_file) | sed 's/\"//g' )
-app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(cluster_details_file) | sed 's/\"//g' )
-app_node_count       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(cluster_details_file) | sed 's/\"//g' )
+app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageName??' $(environments_file) | sed 's/\"//g' )
+app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(environments_file) | sed 's/\"//g' )
+app_node_count       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(environments_file) | sed 's/\"//g' )
 app_hostname        := $(app_hostname_base)-$(app_addr_start)
+ifndef app_image_name
+# image hasn't been set on command line; extract from file
+app_image_name := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
+endif
+ifndef app_image_version
+# version hasn't been set on command line; extract from file
+app_image_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageVersion?' $(environments_file) | sed 's/\"//g' )
+endif
 endif
 
 # Validate that the env_name property is defined and points to a valid environment file.
@@ -141,16 +150,16 @@ validate-env-name:
 	  fi \
 	fi
 
-# Validate that the env_name property is defined and points to a valid environment file.
+# Validate that the profile property is defined and points to a valid profile definition file.
 .PHONY: validate-profile
 validate-profile:
 	$(quiet)if [[ "$(profile)" == "" ]]; then \
 	  echo "Parameter 'profile' is empty: make profile=default ..." &&\
 	  exit 1; \
 	else \
-	  profileFile=profiles/${profile}/main.yml; \
+	  profileFile=profiles/$(profile)/main.yml; \
 	  if [[ ! -e $${profileFile} ]]; then \
-	    echo "Parameter 'profile' has no file: $${profileFile}" &&\
+	    echo "Parameter 'profile' doesn't resolve to valid file: $${profileFile}" &&\
 	    exit 1; \
 	  fi \
 	fi
@@ -368,7 +377,7 @@ project-init:
 .PHONY: create-inventory
 create-inventory: linux-bootstrap
 	@echo "[Makefile.$@] Create an Ansible inventory file" && \
-	source $(create_inventory_script) "$(cluster_details_file)" "$(env_name)" "$(inventory_file)"
+	source $(create_inventory_script) "$(environments_file)" "$(env_name)" "$(inventory_file)"
 
 # Install:
 #   jq: to allow 'make' and 'bash' to interpret JSON
