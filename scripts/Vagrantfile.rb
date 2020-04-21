@@ -492,6 +492,9 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
   vault_password   = File.read( ENV['HOME'] + "/.vault_password_file")
   ansible_password = File.read( ENV['HOME'] + "/.ansible_password_file")
   
+  # Get a list of Vagrant boxes that are available in local cache
+  vagrantBoxList = `vagrant box list`
+  vagrantProvider = clusterDetails['vmProvider']
 
   Vagrant.configure("2") do |config|
     if vagrantCommand == 'ssh'
@@ -511,14 +514,36 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
         if nodeGroup['hostnameArray'] and ((nodeGroup['hostnameArray']).length == nodeGroup['nodeCount'])
           currentNodeName = "#{nodeGroup['hostnameArray'][nodeIndex]}"
         end
-        
+
         currentHostCidr = "#{clusterDetails['natNetBaseIp']}.#{nodeGroup['addrStart'] + nodeIndex}.0/#{clusterDetails['natNetCidrMask']}"
         currentVmIp = "#{clusterDetails['vmNetBaseIp']}.#{nodeGroup['addrStart'] + nodeIndex}"
         currentVmNetMask = "255.255.255.0"
-        
+
+        foundMatch = false
+        vagrantImageName = ''
+        vagrantImageVersion = ''
+        nodeGroup['images'].each do |vagrantImage|
+          vagrantImageName = vagrantImage['imageName']
+          vagrantImageVersion = vagrantImage['imageVersion']
+          vagrantBoxRegexp = "^#{vagrantImageName}[ ]+\\(#{vagrantProvider}, #{vagrantImageVersion}\\)"
+          if vagrantBoxList.match?(/#{vagrantBoxRegexp}/)
+            foundMatch = true
+            break
+          end
+        end
+        # The vagrant ssh-config captures everything from stdout; ensure it doesn't include this
+        if vagrantCommand != 'ssh'
+          if foundMatch
+            puts "[#{nodeGroup['nodeGroup']}] Based on local Vagrant box: '#{vagrantImageName} (#{vagrantProvider}, #{vagrantImageVersion})'"
+          else
+            puts "[#{nodeGroup['nodeGroup']}] Based on Vagrant box: '#{vagrantImageName} (#{vagrantProvider}, #{vagrantImageVersion})'"
+          end
+        end
+
+
         config.vm.define "#{currentNodeName}" do |machine|
-          machine.vm.box = nodeGroup['images'][0]['imageName']
-          machine.vm.box_version = nodeGroup['images'][0]['imageVersion']
+          machine.vm.box = vagrantImageName
+          machine.vm.box_version = vagrantImageVersion
           machine.vm.hostname = currentNodeName
           # eth1: Create a nic to talk to other VMs
           machine.vm.network "private_network", ip: currentVmIp, :netmask => currentVmNetMask

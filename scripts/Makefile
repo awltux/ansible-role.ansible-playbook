@@ -11,7 +11,6 @@ ansible_version := 2.8.1
 # Make parameters
 debug ?= 0
 env_name ?= vagrant-virtualbox
-vagrant_node_group ?= appliance
 # These variables can be used to build from a specific Vagrant image.
 # e.g. from the previous production build to test for upgrade issues.
 app_image_name ?= 
@@ -115,12 +114,12 @@ ifneq (,$(shell which jq))
 local_login          := $(shell jq '.localLogin' $(environments_file) | sed 's/\"//g')
 vm_provider          := $(shell jq '.vmProvider' $(environments_file) | sed 's/\"//g')
 # PROVISIONER CONFIG
-prov_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
-prov_addr_start      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(environments_file) | sed 's/\"//g' )
-prov_hostname        := $(prov_hostname_base)-$(prov_addr_start)
-prov_image_name      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
-prov_image_version   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageVersion?' $(environments_file) | sed 's/\"//g' )
-#prov_build_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .buildVersion?' $(environments_file) | sed 's/\"//g' )
+pro_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
+pro_addr_start      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(environments_file) | sed 's/\"//g' )
+pro_hostname        := $(pro_hostname_base)-$(pro_addr_start)
+pro_image_name      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
+pro_image_version   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageVersion?' $(environments_file) | sed 's/\"//g' )
+#pro_build_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .buildVersion?' $(environments_file) | sed 's/\"//g' )
 # APPLIANCE CONFIG
 app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageName??' $(environments_file) | sed 's/\"//g' )
 app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(environments_file) | sed 's/\"//g' )
@@ -184,7 +183,7 @@ vagrant-up: load-node-data
 	echo "## Extracting SSH config to file: $(ssh_config_file)" &&\
 	echo "#################################################" &&\
 	mkdir -p target &&\
-	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant ssh-config $(prov_hostname) > $(ssh_config_file) \
+	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant_command=ssh vagrant ssh-config $(pro_hostname) > $(ssh_config_file) \
 	) || exit 1
 
 # Run just the ansible provisioning on the jumpbox VM
@@ -193,10 +192,10 @@ vagrant-up: load-node-data
 vagrant-reload: load-node-data
 	$(quiet) time ( \
 	( if [[ ! -e $(ssh_config_file) ]]; then echo "Run 'make vagrant-up' to generate ssh connection file: $(ssh_config_file)" && exit 1; fi ) &&\
-	ssh -F $(ssh_config_file) $(prov_hostname) \
+	ssh -F $(ssh_config_file) $(pro_hostname) \
 	"if [[ ! -e /etc/ansible/linux-provisioner ]]; then \
 		sudo -u $(local_login) bash -c \
-			'ssh-keyscan $(prov_hostname) | grep ecdsa-sha2 > ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts' &&\
+			'ssh-keyscan $(pro_hostname) | grep ecdsa-sha2 > ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts' &&\
 		if [[ $(app_node_count) -gt 0 ]]; then \
 			app_node_max=$$(( $(app_node_count) - 1 )) &&\
 			app_node_seq=\$$(seq 0 \$${app_node_max}); \
@@ -209,9 +208,9 @@ vagrant-reload: load-node-data
 		fi \
 	fi" &&\
 	echo "#################################################" &&\
-	echo "## Running 'vagrant reload --provision $(prov_hostname)" &&\
+	echo "## Running 'vagrant reload --provision $(pro_hostname)" &&\
 	echo "#################################################" &&\
-	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload --provision $(prov_hostname) \
+	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload --provision \
 	) || exit 1
 
 .PHONY: vagrant-box-setup
@@ -264,11 +263,11 @@ endif
 # DEVELOPMENT: Package the local VM into a vagrant box file.
 # Used by make targets: vagrant-box-cache
 .PHONY: vagrant-box-package
-vagrant-box-package:  vagrant-box-setup vagrant-bootstrap-check
+vagrant-box-package: vagrant-box-setup vagrant-bootstrap-check
 ifndef hostname_base
 	$(error vagrant_node_group=$(vagrant_node_group) results in an empty hostname_base)
 endif
-	$(HIDE_CMD) set -x && VAGRANT_BOX_NAME=$(hostname_base)-$(vm_provider)-0.box &&\
+	$(HIDE_CMD) VAGRANT_BOX_NAME=$(image_name)-$(vm_provider)-$(download_version).box &&\
 	rm -f target/$${VAGRANT_BOX_NAME} &&\
 	echo "$(vagrant_node_group): Packaging vagrant box: $(vm_hostname) --> target/$${VAGRANT_BOX_NAME}" &&\
 	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant package --output target/$${VAGRANT_BOX_NAME} $(vm_hostname)
@@ -276,27 +275,40 @@ endif
 # DEVELOPMENT: Add a vagrant box package to the local vagrant cache
 # Used by make targets: vagrant-box-cache
 .PHONY: vagrant-box-add
-vagrant-box-add:  vagrant-box-setup vagrant-bootstrap-check
+vagrant-box-add: vagrant-box-setup vagrant-bootstrap-check
 ifndef hostname_base
 	$(error vagrant_node_group=$(vagrant_node_group) results in an empty hostname_base)
 endif
 ifneq (,$(image_name))
-	$(HIDE_CMD) VAGRANT_BOX_NAME=$(hostname_base)-$(vm_provider)-0.box &&\
-	INSTALLED_BOX_COUNT=`vagrant box list | grep "$(hostname_base).*($(vm_provider), 0)" | wc -l` &&\
+	$(HIDE_CMD) VAGRANT_BOX_NAME=$(image_name)-$(vm_provider)-$(download_version).box &&\
+	INSTALLED_BOX_COUNT=`vagrant box list | grep "$(image_name).*($(vm_provider), $(download_version))" | wc -l` &&\
 	if [[ $${INSTALLED_BOX_COUNT} -eq 0 ]]; then \
-		echo "$(vagrant_node_group): Adding the vagrant box image: $(hostname_base):0" &&\
-		env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant box add --name $(hostname_base) target/$${VAGRANT_BOX_NAME} ; \
+		echo "$(vagrant_node_group): Adding the vagrant box image: $(image_name):$(download_version)" &&\
+		env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant box add --name $(image_name) target/$${VAGRANT_BOX_NAME} ; \
 	else \
-		echo "$(vagrant_node_group): Found cached Vagrant box image for the $(vagrant_node_group): $(hostname_base):0" &&\
-		echo "$(vagrant_node_group): To remove cached Vagrant box image: vagrant box remove --box-version 0 --provider $(vm_provider) $(hostname_base)" &&\
+		echo "$(vagrant_node_group): Found cached Vagrant box image for the $(vagrant_node_group): $(image_name):$(download_version)" &&\
+		echo "$(vagrant_node_group): To remove cached Vagrant box image: vagrant box remove --box-version $(download_version) --provider $(vm_provider) $(image_name)" &&\
 		exit 1; \
 	fi
 endif
 
-# DEVELOPMENT: Add a vagrant box package to the local vagrant cache
-.PHONY: vagrant-box-cache
-vagrant-box-cache:  vagrant-box-setup vagrant-bootstrap-check vagrant-box-package vagrant-box-add
-	 $(HIDE_CMD)echo "$(vagrant_node_group): Cached Vagrant box image: $(hostname_base):0"; \
+.PHONY: _vagrant-box-setup-appliance
+_vagrant-box-setup-appliance:
+vagrant_node_group := appliance
+
+.PHONY: _vagrant-box-setup-provisioner
+_vagrant-box-setup-provisioner:
+vagrant_node_group := provisioner
+
+# DEVELOPMENT: Package the current appliance VM into a vagrant box package and at it to the local vagrant cache
+.PHONY: vagrant-box-cache-appliance
+vagrant-box-cache-appliance: _vagrant-box-setup-appliance vagrant-box-setup vagrant-bootstrap-check vagrant-box-package vagrant-box-add
+	 $(HIDE_CMD)echo "$(vagrant_node_group): Cached Vagrant box image: $(image_name):$(download_version)"; \
+
+# DEVELOPMENT: Package the current provisioner VM into a vagrant box package and at it to the local vagrant cache
+.PHONY: vagrant-box-cache-provisioner
+vagrant-box-cache-provisioner: _vagrant-box-setup-provisioner vagrant-box-setup vagrant-bootstrap-check vagrant-box-package vagrant-box-add
+	 $(HIDE_CMD)echo "$(vagrant_node_group): Cached Vagrant box image: $(image_name):$(download_version)"; \
 
 # Download parent vagrant box from the artifactory vagrant repo
 .PHONY: vagrant-box-download
@@ -392,7 +404,6 @@ linux-bootstrap:
 	flag_file=$${flag_dir}/$@ &&\
 	if [[ ! -e $${flag_file} ]]; then \
 	  sudo yum install -y epel-release &&\
-	  sudo yum -y update &&\
 	  sudo yum install -y libselinux-python python3 python3-pip jq sshpass &&\
 	  sudo su - root -c "pip3 install --upgrade pip" &&\
 	  sudo su - root -c "pip3 install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" &&\
