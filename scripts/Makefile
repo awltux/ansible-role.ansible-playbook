@@ -3,6 +3,17 @@ define help_text
 = Creating an ansible playbook project
 Running 'scripts/project-init.sh' in a GIT BASH (MINGW64) console to create 
 a new ansible project.
+
+Default env_name = vagrant-virtualbox
+Create default environment VMs with debug enabled at level 1: 
+    make debug=1 vagrant-up
+
+Reload changes to the Vagrantfile in default environment VMs:
+    make vagrant-reload
+
+Deploy ansible playbook to vagrant VM's using ssh connection:
+    make vagrant-deploy
+
 endef
 
 # 2.8 has some useful windows tasks e.g. win_user_profile
@@ -11,6 +22,9 @@ ansible_version := 2.8.1
 # Make parameters
 debug ?= 0
 env_name ?= vagrant-virtualbox
+# Used by vagrant-box-* targets to determine which node_group to use
+# [APPLIANCE, provisioner]
+vagrant_node_group ?= appliance
 # These variables can be used to build from a specific Vagrant image.
 # e.g. from the previous production build to test for upgrade issues.
 app_image_name ?= 
@@ -22,7 +36,7 @@ profile ?=
 # Location to keep the log files
 log_dir ?= target
 
-# Store ssh config details (generated during vagarnt-up) used by vagrant-reload to speed up connections
+# Store ssh config details (generated during vagrant-up) used by vagrant-reload to speed up connections
 ssh_config_file = target/ssh.config
 
 quiet := @
@@ -88,6 +102,7 @@ else
 ANSIBLE_PASSWORD_FILE = target/.ansible_password_file
 endif
 $(info ANSIBLE_PASSWORD_FILE=$(ANSIBLE_PASSWORD_FILE))
+$(info vagrant_node_group=$(vagrant_node_group))
 
 .DEFAULT_GOAL := list
 
@@ -95,7 +110,8 @@ $(info ANSIBLE_PASSWORD_FILE=$(ANSIBLE_PASSWORD_FILE))
 .PHONY: list
 list:
 	$(quiet)make -pRrq | \
-	grep '^\([a-zA-Z0-9_-]\+\):.*' | \
+	grep '^[a-zA-Z0-9_-]\+:.*' | \
+	grep -v '^makefile:.*' | \
 	sed 's/^\([a-zA-Z0-9_-]\+\):.*/   \1/' | \
 	sort
 
@@ -135,6 +151,7 @@ app_image_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance
 endif
 endif
 
+
 # Validate that the env_name property is defined and points to a valid environment file.
 .PHONY: validate-env-name
 validate-env-name:
@@ -166,6 +183,7 @@ validate-profile:
 # Docker Desktop conflicts with Virtualbox; must disable Microsoft VM system
 # On Windows install gnuwin32 version of make
 # http://gnuwin32.sourceforge.net/packages/make.htm
+# Restart the VM's and apply any configuration to support ansible deploy 
 .PHONY: vagrant-up
 vagrant-up: load-node-data
 	$(quiet) time ( \
@@ -178,16 +196,15 @@ vagrant-up: load-node-data
 	echo "#################################################" &&\
 	echo "## RUNNING VAGRANT UP" &&\
 	echo "#################################################" &&\
-	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant up --provision &&\
+	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant up &&\
 	echo "#################################################" &&\
-	echo "## Extracting SSH config to file: $(ssh_config_file)" &&\
+	echo "## Extracting vagrant SSH config to file: $(ssh_config_file)" &&\
 	echo "#################################################" &&\
 	mkdir -p target &&\
-	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant_command=ssh vagrant ssh-config $(pro_hostname) > $(ssh_config_file) \
+	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant ssh-config $(pro_hostname) > $(ssh_config_file) \
 	) || exit 1
 
-# Run just the ansible provisioning on the jumpbox VM
-# If provisioner hasnt been previously bootstrapped, add the host key to .ssh/known_hosts 
+# Restart the VM's and apply any configuration to support ansible deploy 
 .PHONY: vagrant-reload
 vagrant-reload: load-node-data
 	$(quiet) time ( \
@@ -210,7 +227,7 @@ vagrant-reload: load-node-data
 	echo "#################################################" &&\
 	echo "## Running 'vagrant reload --provision $(pro_hostname)" &&\
 	echo "#################################################" &&\
-	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload --provision \
+	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload \
 	) || exit 1
 
 .PHONY: vagrant-box-setup
@@ -267,7 +284,7 @@ vagrant-box-package: vagrant-box-setup vagrant-bootstrap-check
 ifndef hostname_base
 	$(error vagrant_node_group=$(vagrant_node_group) results in an empty hostname_base)
 endif
-	$(HIDE_CMD) VAGRANT_BOX_NAME=$(image_name)-$(vm_provider)-$(download_version).box &&\
+	$(quiet) VAGRANT_BOX_NAME=$(image_name)-$(vm_provider)-$(download_version).box &&\
 	rm -f target/$${VAGRANT_BOX_NAME} &&\
 	echo "$(vagrant_node_group): Packaging vagrant box: $(vm_hostname) --> target/$${VAGRANT_BOX_NAME}" &&\
 	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant package --output target/$${VAGRANT_BOX_NAME} $(vm_hostname)
@@ -280,8 +297,8 @@ ifndef hostname_base
 	$(error vagrant_node_group=$(vagrant_node_group) results in an empty hostname_base)
 endif
 ifneq (,$(image_name))
-	$(HIDE_CMD) VAGRANT_BOX_NAME=$(image_name)-$(vm_provider)-$(download_version).box &&\
-	INSTALLED_BOX_COUNT=`vagrant box list | grep "$(image_name).*($(vm_provider), $(download_version))" | wc -l` &&\
+	$(quiet) VAGRANT_BOX_NAME=$(image_name)-$(vm_provider)-$(download_version).box &&\
+	INSTALLED_BOX_COUNT=`vagrant box list | grep "$(image_name)[ ]\+($(vm_provider), $(download_version))" | wc -l` &&\
 	if [[ $${INSTALLED_BOX_COUNT} -eq 0 ]]; then \
 		echo "$(vagrant_node_group): Adding the vagrant box image: $(image_name):$(download_version)" &&\
 		env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant box add --name $(image_name) target/$${VAGRANT_BOX_NAME} ; \
@@ -292,30 +309,18 @@ ifneq (,$(image_name))
 	fi
 endif
 
-.PHONY: _vagrant-box-setup-appliance
-_vagrant-box-setup-appliance:
-vagrant_node_group := appliance
 
-.PHONY: _vagrant-box-setup-provisioner
-_vagrant-box-setup-provisioner:
-vagrant_node_group := provisioner
-
-# DEVELOPMENT: Package the current appliance VM into a vagrant box package and at it to the local vagrant cache
-.PHONY: vagrant-box-cache-appliance
-vagrant-box-cache-appliance: _vagrant-box-setup-appliance vagrant-box-setup vagrant-bootstrap-check vagrant-box-package vagrant-box-add
-	 $(HIDE_CMD)echo "$(vagrant_node_group): Cached Vagrant box image: $(image_name):$(download_version)"; \
-
-# DEVELOPMENT: Package the current provisioner VM into a vagrant box package and at it to the local vagrant cache
-.PHONY: vagrant-box-cache-provisioner
-vagrant-box-cache-provisioner: _vagrant-box-setup-provisioner vagrant-box-setup vagrant-bootstrap-check vagrant-box-package vagrant-box-add
-	 $(HIDE_CMD)echo "$(vagrant_node_group): Cached Vagrant box image: $(image_name):$(download_version)"; \
+# DEVELOPMENT: Package the current VM into a vagrant box package and at it to the local vagrant cache
+.PHONY: vagrant-box-cache
+vagrant-box-cache: vagrant-box-setup vagrant-bootstrap-check vagrant-box-package vagrant-box-add
+	 $(quiet)echo "$(vagrant_node_group): Cached Vagrant box image: $(image_name):$(download_version)"; \
 
 # Download parent vagrant box from the artifactory vagrant repo
 .PHONY: vagrant-box-download
 vagrant-box-download: vagrant-box-setup vagrant-bootstrap-check
 ifneq (,$(app_image_name))
 	$(info APPLIANCE: Attempt to download VM image from: $(vagrant_app_download_url))
-	$(HIDE_CMD) INSTALLED_BOX_COUNT=`vagrant box list | grep "$(app_image_name).*$(vm_provider).*$(app_image_version)" | wc -l` &&\
+	$(quiet) INSTALLED_BOX_COUNT=`vagrant box list | grep "$(app_image_name).*$(vm_provider).*$(app_image_version)" | wc -l` &&\
 	if [[ $${INSTALLED_BOX_COUNT} -eq 0 ]]; then \
 		echo "APPLIANCE: Downloading the vagrant box image: $(app_image_name):$(app_image_version)" &&\
 		PASSWORD_FILE="target/.ansible_password_file" &&\
@@ -331,7 +336,7 @@ ifneq (,$(app_image_name))
 endif
 ifneq (,$(pro_image_name))
 	$(info PROVISIONER: Attempt to download VM image from: $(vagrant_pro_download_url))
-	$(HIDE_CMD) INSTALLED_BOX_COUNT=`vagrant box list | grep "$(pro_image_name).*$(vm_provider).*$(pro_image_version)" | wc -l` &&\
+	$(quiet) INSTALLED_BOX_COUNT=`vagrant box list | grep "$(pro_image_name).*$(vm_provider).*$(pro_image_version)" | wc -l` &&\
 	if [[ $${INSTALLED_BOX_COUNT} -eq 0 ]]; then \
 		echo "PROVISIONER: Downloading the vagrant box image: $(pro_image_name):$(pro_image_version)" &&\
 		PASSWORD_FILE="target/.ansible_password_file" &&\
@@ -352,10 +357,22 @@ ansible-setup:
 	$(quiet)# Install python3 \
 	# Install ansible if on provisioner
 
-# Run ansible on the provisioner
+# [ONLY WORKS WHEN RUN ON PROVISIONER] Run ansible on the provisioner
 .PHONY: ansible-deploy
 ansible-deploy: linux-appliance
 	$(quiet):
+
+
+# Run ansible on the provisioner using ssh and the ssh.config created by vagrant-up
+.PHONY: vagrant-deploy
+vagrant-deploy: load-node-data
+	$(quiet) ( \
+	ssh_command="sudo su - $(local_login) -c \"cd /projects/$(app_hostname_base) && pwd && make env_name=${env_name} debug=${debug} ansible-deploy\"" &&\
+	echo "#################################################" &&\
+	echo "## Running ansible_deploy on vagrant host over ssh" &&\
+	echo "#################################################" &&\
+	echo "$${ssh_command}" | ssh -F $(ssh_config_file) $(pro_hostname) \
+	) || exit 1
 
 .PHONY: molecule-test
 molecule-test:
@@ -384,13 +401,14 @@ windows-needs-admin:
 project-init:
 	$(quiet)bash ./roles/ansible-role.ansible-playbook/scripts/project-init.sh "$(_project_name)"
 	
-# If the inventory file is missing for the requested environment, create 
-# a simple one from the clusterDetails.json
+# If the inventory file is missing for the requested environment, 
+# create a simple one from the clusterDetails.json
 .PHONY: create-inventory
 create-inventory: linux-bootstrap
 	@echo "[Makefile.$@] Create an Ansible inventory file" && \
 	source $(create_inventory_script) "$(environments_file)" "$(env_name)" "$(inventory_file)"
 
+# [ONLY WORKS WHEN RUN ON PROVISIONER] 
 # Install:
 #   jq: to allow 'make' and 'bash' to interpret JSON
 #   sshpass: needed by ansible to connect over ssh
@@ -412,6 +430,7 @@ linux-bootstrap:
 	fi \
 	) || exit 1
 
+# [ONLY WORKS WHEN RUN ON PROVISIONER]
 # Deploys provisioner specific changes using ansible
 .PHONY: linux-provisioner
 linux-provisioner: linux-bootstrap
@@ -424,6 +443,7 @@ linux-provisioner: linux-bootstrap
 	provisioner.playbook 2>&1 | tee $(log_dir)/$@.log ) || ( export RETURN_CODE=$$? && echo "$@ RC: $$RETURN_CODE"; exit $$RETURN_CODE )
 
   
+# [ONLY WORKS WHEN RUN ON PROVISIONER]
 # Deploys appliance specific changes using ansible
 .PHONY: linux-appliance
 linux-appliance:

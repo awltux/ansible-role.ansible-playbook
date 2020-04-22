@@ -497,7 +497,8 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
   vagrantProvider = clusterDetails['vmProvider']
 
   Vagrant.configure("2") do |config|
-    if vagrantCommand == 'ssh'
+    # The vagrant ssh-config should use localUser
+    if vagrantCommand == 'ssh-config'
       config.ssh.username = clusterDetails['localUser']
     end
     # always use Vagrants insecure key
@@ -532,7 +533,7 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
           end
         end
         # The vagrant ssh-config captures everything from stdout; ensure it doesn't include this
-        if vagrantCommand != 'ssh'
+        if vagrantCommand != 'ssh-config'
           if foundMatch
             puts "[#{nodeGroup['nodeGroup']}] Based on local Vagrant box: '#{vagrantImageName} (#{vagrantProvider}, #{vagrantImageVersion})'"
           else
@@ -547,15 +548,31 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
           machine.vm.hostname = currentNodeName
           # eth1: Create a nic to talk to other VMs
           machine.vm.network "private_network", ip: currentVmIp, :netmask => currentVmNetMask
+
           # Virtualbox specific stuff
-          machine.vm.provider clusterDetails['vmProvider'] do |provider_vm|
-            provider_vm.name = currentNodeName
-            provider_vm.memory = nodeGroup['memory']
-            provider_vm.cpus = nodeGroup['cpu']
-            # eth0: Modify network address for default NAT nic created by vagrant.
-            #       Otherwise vagrant would make all nodes 10.0.2.15, which confuses kubeadm
-            provider_vm.customize ['modifyvm',:id, '--natnet1', "#{currentHostCidr}"]
+          if vmProvider == 'virtualbox'
+            machine.vm.provider 'virtualbox' do |provider_vm|
+              provider_vm.name = currentNodeName
+              provider_vm.memory = nodeGroup['memory']
+              provider_vm.cpus = nodeGroup['cpu']
+              # eth0: Modify network address for default NAT nic created by vagrant.
+              #       Otherwise vagrant would make all nodes 10.0.2.15, which confuses kubeadm
+              provider_vm.customize ['modifyvm',:id, '--natnet1', "#{currentHostCidr}"]
+            end
           end
+
+          # hyper-v specific stuff
+          if vmProvider == 'hyperv'
+            machine.vm.provider "hyperv" do |provider_vm|
+              provider_vm.vmname = currentNodeName
+              provider_vm.memory = nodeGroup['memory']
+              provider_vm.cpus = nodeGroup['cpu']
+              # eth0: Modify network address for default NAT nic created by vagrant.
+              #       Otherwise vagrant would make all nodes 10.0.2.15, which confuses kubeadm
+              # provider_vm.customize ['modifyvm',:id, '--natnet1', "#{currentHostCidr}"]
+            end
+          end
+
           # Clean VM has been created, now configuration it. 
           # Last host to be created should always the provisioner, which runs the ansible playbook
           configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentNodeName, currentVmIp, ansible_password, vault_password, currentNodeIndex)
