@@ -36,7 +36,9 @@ profile ?=
 # Location to keep the log files
 log_dir ?= target
 
-# Store ssh config details (generated during vagrant-up) used by vagrant-reload to speed up connections
+gitRemoteBranch ?= origin/master
+
+# Store ssh config details (generated during vagarnt-up) used by vagrant-reload to speed up connections
 ssh_config_file = target/ssh.config
 
 quiet := @
@@ -378,15 +380,50 @@ vagrant-deploy: load-node-data
 molecule-test:
 	$(quiet)# Run molecule unit tests on provisioner using docker
 
-# Pull the project and any submodules is has
-.PHONY: git-pull-origin-master
-git-pull-origin-master:
-	$(quiet)git pull origin master
+# Pull parent project and preserve submodule versions set in parent.
+# submodule sync: ensures changes to .gitmodule are synced with local .git/config
+# submodule update: ensures submodules are reset to their correct version
+.PHONY: git-pull
+git-pull:
+	$(info WARNING: Pulling the latest change-sets, including reset of submodules)
+	git pull --recurse-submodules &&\
+	git submodule sync &&\
+	git submodule update --init --recursive
 
+# BEWARE: This is to allow developers to make changes to the submodules.
+# BIG ASSUMPTION THAT ALL SUBMODULES ARE ON ORIGIN MASTER BRANCH
+.PHONY: git-pull-hard
+git-pull-hard:
+	$(info DEV_ONLY: Ignoring current submodule versions and pulling HEAD of ORIGIN MASTER )
+	$(HIDE_CMD) \
+	if [[ ! $$( git status -s | wc -l ) -eq 0 ]]; then \
+	  echo "[ERROR] There are local changes in git repo" &&\
+		exit 1; \
+	fi &&\
+	gitRemote=$$(echo $(gitRemoteBranch) | sed -e "s#^\([^/]\+\)/.*#\1#g" ) &&\
+	gitBranch=$$(echo $(gitRemoteBranch) | sed -e "s#^[^/]\+/##g" ) &&\
+	if git branch | grep -q $${gitBranch}; then \
+		git fetch $${gitRemote} $${gitBranch}; \
+	else \
+		git fetch $${gitRemote} $${gitBranch}:$${gitBranch}; \
+	fi &&\
+	git rebase HEAD $${gitBranch} &&\
+	git pull --rebase $${gitRemote} $${gitBranch} &&\
+	git submodule foreach --recursive " \
+		if git branch | grep -q $${gitBranch}; then \
+			git fetch $${gitRemote} $${gitBranch}; \
+		else \
+			git fetch $${gitRemote} $${gitBranch}:$${gitBranch}; \
+		fi &&\
+		git rebase HEAD $${gitBranch} &&\
+		git pull --rebase $${gitRemote} $${gitBranch}"
+
+
+# FIXME: Can only push if HEAD is at the tip of a branch
 # Push the project and any submodules is has
-.PHONY: git-push-origin-master
-git-push-origin-master:
-	$(quiet)git push origin master
+#.PHONY: git-push-origin-master
+#git-push-origin-master:
+#	$(quiet)git push origin master
 
 .PHONY: windows-needs-admin
 windows-needs-admin:
