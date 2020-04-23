@@ -550,7 +550,7 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
           machine.vm.network "private_network", ip: currentVmIp, :netmask => currentVmNetMask
 
           # Virtualbox specific stuff
-          if vmProvider == 'virtualbox'
+          if vagrantProvider == 'virtualbox'
             machine.vm.provider 'virtualbox' do |provider_vm|
               provider_vm.name = currentNodeName
               provider_vm.memory = nodeGroup['memory']
@@ -562,7 +562,7 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
           end
 
           # hyper-v specific stuff
-          if vmProvider == 'hyperv'
+          if vagrantProvider == 'hyperv'
             machine.vm.provider "hyperv" do |provider_vm|
               provider_vm.vmname = currentNodeName
               provider_vm.memory = nodeGroup['memory']
