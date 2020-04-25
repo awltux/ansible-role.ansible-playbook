@@ -473,9 +473,11 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
 
       end
     end
+
+    # Mount the project folder inside VM
+    machine.vm.synced_folder ".", "/projects/#{appHostnameBase}", automount: true, mount_options: ["dmode=770,fmode=660"]
     
     # Now run ansible playbook
-    machine.vm.synced_folder ".", "/projects/#{appHostnameBase}", automount: true, mount_options: ["dmode=770,fmode=660"]
     machine.vm.provision  "shell" do |bash_shell|
       bash_shell.inline = $run_ansible_playbook
       bash_shell.privileged = false

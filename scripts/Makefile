@@ -232,6 +232,29 @@ vagrant-reload: load-node-data
 	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload \
 	) || exit 1
 
+# Run ansible on the provisioner using ssh and the ssh.config created by vagrant-up
+.PHONY: vagrant-deploy
+vagrant-deploy: load-node-data
+	$(quiet) time ( \
+	ssh_command="sudo su - $(local_login) -c \"cd /projects/$(app_hostname_base) && whoami && make env_name=${env_name} debug=${debug} linux-appliance\"" &&\
+	echo "#################################################" &&\
+	echo "## Running linux-appliance on vagrant host over ssh" &&\
+	echo "#################################################" &&\
+	echo "$${ssh_command}" | ssh -F $(ssh_config_file) $(pro_hostname) \
+	) || exit 1
+
+# Run ansible on the provisioner using ssh and the ssh.config created by vagrant-up
+.PHONY: vagrant-deploy-provisioner
+vagrant-deploy-provisioner: load-node-data
+	$(quiet) time ( \
+	ssh_command="sudo su - $(local_login) -c \"cd /projects/$(app_hostname_base) && whoami && make env_name=${env_name} debug=${debug} linux-provisioner\"" &&\
+	echo "#################################################" &&\
+	echo "## Running linux-provisioner on vagrant host over ssh" &&\
+	echo "#################################################" &&\
+	echo "$${ssh_command}" | ssh -F $(ssh_config_file) $(pro_hostname) \
+	) || exit 1
+
+
 .PHONY: vagrant-box-setup
 vagrant-box-setup: load-node-data
 BUILD_NUMBER ?= 0
@@ -365,17 +388,6 @@ ansible-deploy: linux-appliance
 	$(quiet):
 
 
-# Run ansible on the provisioner using ssh and the ssh.config created by vagrant-up
-.PHONY: vagrant-deploy
-vagrant-deploy: load-node-data
-	$(quiet) ( \
-	ssh_command="sudo su - $(local_login) -c \"cd /projects/$(app_hostname_base) && pwd && make env_name=${env_name} debug=${debug} ansible-deploy\"" &&\
-	echo "#################################################" &&\
-	echo "## Running ansible_deploy on vagrant host over ssh" &&\
-	echo "#################################################" &&\
-	echo "$${ssh_command}" | ssh -F $(ssh_config_file) $(pro_hostname) \
-	) || exit 1
-
 .PHONY: molecule-test
 molecule-test:
 	$(quiet)# Run molecule unit tests on provisioner using docker
@@ -452,16 +464,16 @@ create-inventory: linux-bootstrap
 #   ansible: from pip becuase yum version has out of date dependencies
 #   dnspython: allows hostnames to be resolved by ansible
 .PHONY: linux-bootstrap
-linux-bootstrap:
+linux-bootstrap: mkdir_target
 	# FIXME: Need to add username=$(ldap_login) and password=$(ANSIBLE_PASSWORD_FILE) to /etc/yum.conf: [main] section
 	$(quiet)( \
 	flag_dir=/etc/ansible &&\
 	flag_file=$${flag_dir}/$@ &&\
 	if [[ ! -e $${flag_file} ]]; then \
 	  sudo yum install -y epel-release &&\
-	  sudo yum install -y libselinux-python python3 python3-pip jq sshpass &&\
-	  sudo su - root -c "pip3 install --upgrade pip" &&\
-	  sudo su - root -c "pip3 install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" &&\
+	  sudo yum install -y libselinux-python python2-pip jq sshpass &&\
+	  sudo su - root -c "pip install --upgrade pip" &&\
+	  sudo su - root -c "pip install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" &&\
 	  sudo mkdir -p $${flag_dir} &&\
 	  sudo touch $${flag_file}; \
 	fi \
