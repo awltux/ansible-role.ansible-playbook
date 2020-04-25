@@ -19,7 +19,7 @@
         },
         {
           "description": "Public image",
-          "imageName": "centos/7",
+          "imageName": "centos/8",
           "imageVersion": "1905.1"
         }
       ],
@@ -39,12 +39,12 @@
         },
         {
           "description": "Intermediate",
-          "imageName": "centos7-baseline",
+          "imageName": "centos8-baseline",
           "imageVersion": "1905.1"
         },
         {
           "description": "Public image",
-          "imageName": "centos/7",
+          "imageName": "centos/8",
           "imageVersion": "1905.1"
         }
       ],

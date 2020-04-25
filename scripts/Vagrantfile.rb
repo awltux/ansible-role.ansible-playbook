@@ -22,7 +22,7 @@ debug=${1:-0}
 
 echo "######################################################"
 echo "[Vagrantfile.network_config_linux]  $(whoami)@$(hostname)"
-echo "######################################################"
+
 if [[ ! "${debug}" == "0" ]]; then
 set -x
 fi
@@ -153,8 +153,7 @@ $ssh_fingerprint_config_linux = <<-SSH_FINGERPRINT_CONFIG_LINUX_HEREDOC
 debug=${1:-0}
 
 echo "######################################################"
-echo "[Vagrantfile.ssh_fingerprint_config_linux]  $(whoami)@$(hostname)"
-echo "######################################################"
+echo "## [Vagrantfile.ssh_fingerprint_config_linux]  $(whoami)@$(hostname)"
 if [[ ! "${debug}" == "0" ]]; then
 set -x
 fi
@@ -172,10 +171,10 @@ knownHostsFile="${homeDir}/.ssh/known_hosts"
 targetIpAddress=$(getent hosts ${targetHostname} | cut -d' ' -f1)
 
 fingerprint_raw=$( ssh-keyscan -H ${targetHostname} | grep 'ecdsa-sha2' )
-fingerprint="${targetHostname},targetIpAddress $(echo $fingerprint_raw | cut -d' ' -f2-)"
+fingerprint="${targetHostname},${targetIpAddress} $(echo $fingerprint_raw | cut -d' ' -f2-)"
 if [[ ! -e ${knownHostsFile} ]] || ( ! grep -q "${fingerprint}" ${knownHostsFile} ); then
-  echo "[INFO] Adding fingerprint for: ${ansibleAccount}@${targetHostname}:22"
-  echo "${fingerprint}" >> ${knownHostsFile}
+  echo "######################################################"
+  su - ${ansibleAccount} -c "echo \"${fingerprint}\" >> ${knownHostsFile}"
 fi
 
 SSH_FINGERPRINT_CONFIG_LINUX_HEREDOC
@@ -191,8 +190,7 @@ $host_config_linux = <<-HOST_CONFIG_LINUX_HEREDOC
 debug=${1:-0}
 
 echo "######################################################"
-echo "[Vagrantfile.host_config_linux]  $(whoami)@$(hostname)"
-echo "######################################################"
+echo "## [Vagrantfile.host_config_linux]  $(whoami)@$(hostname)"
 if [[ ! "${debug}" == "0" ]]; then
 set -x
 fi
@@ -486,6 +484,35 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
 
 end
 
+# Vagrant cannot build CentOS 8 guest additions.
+# due to missing yum/dnf repositories: C*-base
+# This fix is from: https://github.com/dotless-de/vagrant-vbguest/issues/367#issuecomment-602494723
+# FIXME: This will probably be fixed someday and this class removed
+class Centos8VbGuestInstaller < VagrantVbguest::Installers::CentOS
+  def has_rel_repo?
+    unless instance_variable_defined?(:@has_rel_repo)
+      rel = release_version
+      @has_rel_repo = communicate.test("yum repolist")
+    end
+    @has_rel_repo
+  end
+
+  def install_kernel_devel(opts=nil, &block)
+    cmd = "yum update kernel -y"
+    communicate.sudo(cmd, opts, &block)
+
+    cmd = "yum install -y kernel-devel"
+    communicate.sudo(cmd, opts, &block)
+
+    cmd = "shutdown -r now"
+    communicate.sudo(cmd, opts, &block)
+
+    begin
+      sleep 5
+    end until @vm.communicate.ready?
+  end
+end
+
 # Called from project ../../Vagrantfile
 # Create a VM for each node declared by clusterDetails.nodeGroups (normally just a provisioner and an appliance )
 def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagrantCommand='default')
@@ -545,6 +572,11 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
         config.vm.define "#{currentNodeName}" do |machine|
           machine.vm.box = vagrantImageName
           machine.vm.box_version = vagrantImageVersion
+          
+          # Fix for building VirtualBox Guest Additions for CentOS8
+          # FIXME: This will probably be fixed someday and this line removed
+          machine.vbguest.installer = Centos8VbGuestInstaller
+
           machine.vm.hostname = currentNodeName
           # eth1: Create a nic to talk to other VMs
           machine.vm.network "private_network", ip: currentVmIp, :netmask => currentVmNetMask

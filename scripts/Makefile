@@ -192,16 +192,13 @@ vagrant-up: load-node-data
 	if ! (env_name=$(env_name) vagrant plugin list | grep -q vagrant-vbguest); then \
 	  echo "#################################################" &&\
 	  echo "## INSTALL VAGRANT PLUGIN: VirtualBox Guest installer" &&\
-	  echo "#################################################" &&\
 	  env_name=$(env_name) vagrant plugin install vagrant-vbguest; \
 	fi &&\
 	echo "#################################################" &&\
 	echo "## RUNNING VAGRANT UP" &&\
-	echo "#################################################" &&\
 	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant up &&\
 	echo "#################################################" &&\
 	echo "## Extracting vagrant SSH config to file: $(ssh_config_file)" &&\
-	echo "#################################################" &&\
 	mkdir -p target &&\
 	env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant ssh-config $(pro_hostname) > $(ssh_config_file) \
 	) || exit 1
@@ -210,26 +207,33 @@ vagrant-up: load-node-data
 .PHONY: vagrant-reload
 vagrant-reload: load-node-data
 	$(quiet) time ( \
-	( if [[ ! -e $(ssh_config_file) ]]; then echo "Run 'make vagrant-up' to generate ssh connection file: $(ssh_config_file)" && exit 1; fi ) &&\
+	( \
+	if [[ ! -e $(ssh_config_file) ]]; then \
+		echo "Run 'make vagrant-up' to generate ssh connection file: $(ssh_config_file)" &&\
+		exit 1; \
+	fi ) &&\
+	echo "#################################################" &&\
+	echo "## Populating ~$(local_login)/.ssh/known_hosts" &&\
 	ssh -F $(ssh_config_file) $(pro_hostname) \
-	"if [[ ! -e /etc/ansible/linux-provisioner ]]; then \
-		sudo -u $(local_login) bash -c \
-			'ssh-keyscan $(pro_hostname) | grep ecdsa-sha2 > ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts' &&\
-		if [[ $(app_node_count) -gt 0 ]]; then \
-			app_node_max=$$(( $(app_node_count) - 1 )) &&\
-			app_node_seq=\$$(seq 0 \$${app_node_max}); \
-			for app_index in \$${app_node_seq}; do \
-				app_node_index=\$$(( $(app_addr_start) + \$${app_index} )) &&\
-				app_hostname=\"$(app_hostname_base)-\$${app_node_index}\" &&\
-				sudo -u $(local_login) bash -c \
-				  \"ssh-keyscan \$${app_hostname} | grep ecdsa-sha2 >> ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts\"; \
-			done \
-		fi \
-	fi" &&\
+		"flag_dir=/etc/ansible &&\
+		flag_file=\\$${flag_dir}/$(_project_name) &&\
+		if [[ ! -e \\$${flag_file} ]]; then \
+			sudo -u $(local_login) bash -c \
+				'ssh-keyscan $(pro_hostname) | grep ecdsa-sha2 > ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts' &&\
+			if [[ $(app_node_count) -gt 0 ]]; then \
+				app_node_max=$$(( $(app_node_count) - 1 )) &&\
+				app_node_seq=\$$(seq 0 \$${app_node_max}); \
+				for app_index in \$${app_node_seq}; do \
+					app_node_index=\$$(( $(app_addr_start) + \$${app_index} )) &&\
+					app_hostname=\"$(app_hostname_base)-\$${app_node_index}\" &&\
+					sudo -u $(local_login) bash -c \
+					\"ssh-keyscan \$${app_hostname} | grep ecdsa-sha2 >> ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts\"; \
+				done \
+			fi \
+		fi" &&\
 	echo "#################################################" &&\
-	echo "## Running 'vagrant reload --provision $(pro_hostname)" &&\
-	echo "#################################################" &&\
-	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload \
+	echo "## Running 'debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload --provision" &&\
+	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload --provision \
 	) || exit 1
 
 .PHONY: vagrant-box-setup
@@ -456,10 +460,10 @@ linux-bootstrap:
 	# FIXME: Need to add username=$(ldap_login) and password=$(ANSIBLE_PASSWORD_FILE) to /etc/yum.conf: [main] section
 	$(quiet)( \
 	flag_dir=/etc/ansible &&\
-	flag_file=$${flag_dir}/$@ &&\
+	flag_file=$${flag_dir}/$(_project_name) &&\
 	if [[ ! -e $${flag_file} ]]; then \
 	  sudo yum install -y epel-release &&\
-	  sudo yum install -y libselinux-python python3 python3-pip jq sshpass &&\
+	  sudo yum install -y python3-pip jq sshpass &&\
 	  sudo su - root -c "pip3 install --upgrade pip" &&\
 	  sudo su - root -c "pip3 install ansible==$(ansible_version) dnspython requests pywinrm netaddr jmespath selinux" &&\
 	  sudo mkdir -p $${flag_dir} &&\
