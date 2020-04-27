@@ -174,6 +174,7 @@ fingerprint_raw=$( ssh-keyscan -H ${targetHostname} | grep 'ecdsa-sha2' )
 fingerprint="${targetHostname},${targetIpAddress} $(echo $fingerprint_raw | cut -d' ' -f2-)"
 if [[ ! -e ${knownHostsFile} ]] || ( ! grep -q "${fingerprint}" ${knownHostsFile} ); then
   echo "######################################################"
+  echo "## Adding known_hosts fingerprint to ${ansibleAccount}@$(hostname): ${fingerprint}"
   su - ${ansibleAccount} -c "echo \"${fingerprint}\" >> ${knownHostsFile}"
 fi
 
