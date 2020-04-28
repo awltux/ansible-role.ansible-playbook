@@ -132,24 +132,24 @@ ifneq (,$(shell which jq))
 local_login          := $(shell jq '.localLogin' $(environments_file) | sed 's/\"//g')
 vm_provider          := $(shell jq '.vmProvider' $(environments_file) | sed 's/\"//g')
 # PROVISIONER CONFIG
-pro_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
+pro_hostname_base   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[1].imageName?' $(environments_file) | sed 's/\"//g' )
 pro_addr_start      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .addrStart?' $(environments_file) | sed 's/\"//g' )
 pro_hostname        := $(pro_hostname_base)-$(pro_addr_start)
-pro_image_name      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
-pro_image_version   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[0].imageVersion?' $(environments_file) | sed 's/\"//g' )
+pro_image_name      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[1].imageName?' $(environments_file) | sed 's/\"//g' )
+pro_image_version   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[1].imageVersion?' $(environments_file) | sed 's/\"//g' )
 #pro_build_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .buildVersion?' $(environments_file) | sed 's/\"//g' )
 # APPLIANCE CONFIG
-app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageName??' $(environments_file) | sed 's/\"//g' )
+app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[1].imageName??' $(environments_file) | sed 's/\"//g' )
 app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(environments_file) | sed 's/\"//g' )
 app_node_count       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(environments_file) | sed 's/\"//g' )
 app_hostname        := $(app_hostname_base)-$(app_addr_start)
 ifndef app_image_name
 # image hasn't been set on command line; extract from file
-app_image_name := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageName?' $(environments_file) | sed 's/\"//g' )
+app_image_name := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[1].imageName?' $(environments_file) | sed 's/\"//g' )
 endif
 ifndef app_image_version
 # version hasn't been set on command line; extract from file
-app_image_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[0].imageVersion?' $(environments_file) | sed 's/\"//g' )
+app_image_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[1].imageVersion?' $(environments_file) | sed 's/\"//g' )
 endif
 endif
 
@@ -194,9 +194,14 @@ vagrant-up: load-node-data
 	  echo "## INSTALL VAGRANT PLUGIN: VirtualBox Guest installer" &&\
 	  env_name=$(env_name) vagrant plugin install vagrant-vbguest; \
 	fi &&\
+	PROVISION_FLAG='' &&\
+	INSTALLED_BOX_COUNT=`vagrant box list | grep "$(pro_image_name)[ ]\+($(vm_provider), 0)" | wc -l` &&\
+	if [[ $${INSTALLED_BOX_COUNT} -eq 0 ]]; then \
+	  PROVISION_FLAG='--provision'; \
+	fi &&\
 	echo "#################################################" &&\
 	echo "## RUNNING VAGRANT UP" &&\
-	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant up &&\
+	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant up $${PROVISION_FLAG}&&\
 	echo "#################################################" &&\
 	echo "## Extracting vagrant SSH config to file: $(ssh_config_file)" &&\
 	mkdir -p target &&\
@@ -213,28 +218,10 @@ vagrant-reload: load-node-data
 		exit 1; \
 	fi ) &&\
 	echo "#################################################" &&\
-	echo "## Populating ~$(local_login)/.ssh/known_hosts" &&\
-	ssh -F $(ssh_config_file) $(pro_hostname) \
-		"flag_dir=/etc/ansible &&\
-		flag_file=\\$${flag_dir}/$(_project_name) &&\
-		if [[ ! -e \\$${flag_file} ]]; then \
-			sudo -u $(local_login) bash -c \
-				'ssh-keyscan $(pro_hostname) | grep ecdsa-sha2 > ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts' &&\
-			if [[ $(app_node_count) -gt 0 ]]; then \
-				app_node_max=$$(( $(app_node_count) - 1 )) &&\
-				app_node_seq=\$$(seq 0 \$${app_node_max}); \
-				for app_index in \$${app_node_seq}; do \
-					app_node_index=\$$(( $(app_addr_start) + \$${app_index} )) &&\
-					app_hostname=\"$(app_hostname_base)-\$${app_node_index}\" &&\
-					sudo -u $(local_login) bash -c \
-					\"ssh-keyscan \$${app_hostname} | grep ecdsa-sha2 >> ~$(local_login)/.ssh/known_hosts && chmod 600 ~$(local_login)/.ssh/known_hosts\"; \
-				done \
-			fi \
-		fi" &&\
-	echo "#################################################" &&\
 	echo "## Running 'debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload --provision" &&\
 	debug=$(debug) env_name=$(env_name) VAGRANT_LOG=$(VAGRANT_LOG) vagrant reload --provision \
 	) || exit 1
+
 
 .PHONY: vagrant-box-setup
 vagrant-box-setup: load-node-data

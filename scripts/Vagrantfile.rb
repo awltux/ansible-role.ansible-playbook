@@ -168,14 +168,16 @@ fi
 
 homeDir="/home/${ansibleAccount}"
 knownHostsFile="${homeDir}/.ssh/known_hosts"
-targetIpAddress=$(getent hosts ${targetHostname} | cut -d' ' -f1)
+# Get IP4 address for targetHostname
+targetIpAddress=$(getent ahosts ${targetHostname} | head -n 1 | cut -d' ' -f1)
 
 fingerprint_raw=$( ssh-keyscan -H ${targetHostname} | grep 'ecdsa-sha2' )
 fingerprint="${targetHostname},${targetIpAddress} $(echo $fingerprint_raw | cut -d' ' -f2-)"
 if [[ ! -e ${knownHostsFile} ]] || ( ! grep -q "${fingerprint}" ${knownHostsFile} ); then
   echo "######################################################"
-  echo "## Adding known_hosts fingerprint to ${ansibleAccount}@$(hostname): ${fingerprint}"
-  su - ${ansibleAccount} -c "echo \"${fingerprint}\" >> ${knownHostsFile}"
+  echo "## Adding known_hosts fingerprint to ${ansibleAccount}@$(hostname):${knownHostsFile} -> ${fingerprint}"
+  echo "${fingerprint}" >> ${knownHostsFile}
+  chown ${ansibleAccount}.users ${knownHostsFile}
 fi
 
 SSH_FINGERPRINT_CONFIG_LINUX_HEREDOC
@@ -408,7 +410,7 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
   clusterDetails['nodeGroups'].each do |targetNodeType|
     (0..targetNodeType['nodeCount']-1).each do |targetNodeIndex|
       
-      targetHostName = "#{targetNodeType['images'][0]['imageName']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
+      targetHostName = "#{targetNodeType['images'][1]['imageName']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
       if targetNodeType['hostnameArray'] and ((targetNodeType['hostnameArray']).length == targetNodeType['nodeCount'])
         targetHostName = "#{targetNodeType['hostnameArray'][targetNodeIndex]}"
       end
@@ -437,12 +439,12 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
     end
     if targetNodeType['nodeGroup'] == 'appliance'
       targetOsFamily = targetNodeType['osFamily']
-      appHostnameBase = targetNodeType['images'][0]['imageName']
+      appHostnameBase = targetNodeType['images'][1]['imageName']
     end
   end
 
   # Only the provisioner runs ansible
-  provisionerHostnameBase = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['images'][0]['imageName']
+  provisionerHostnameBase = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['images'][1]['imageName']
   provisionerAddrStart = clusterDetails["nodeGroups"].find {|ng| ng['nodeGroup']=='provisioner'}['addrStart']
   provisionerHostname = "#{provisionerHostnameBase}-#{provisionerAddrStart}"
   if provisionerHostname == currentHostName
@@ -450,22 +452,20 @@ def configureHost(debug, env_name, nodeGroup, machine, clusterDetails, currentHo
     clusterDetails['nodeGroups'].each do |nodeGroup|
       (0..nodeGroup['nodeCount']-1).each do |nodeIndex|
         currentNodeIndex= nodeGroup['addrStart'] + nodeIndex
-        currentNodeName = "#{nodeGroup['images'][0]['imageName']}-#{currentNodeIndex}"
+        currentNodeName = "#{nodeGroup['images'][1]['imageName']}-#{currentNodeIndex}"
 
         # Loop over all targets for the currentNode
         clusterDetails['nodeGroups'].each do |targetNodeType|
           (0..targetNodeType['nodeCount']-1).each do |targetNodeIndex|
-            targetHostName = "#{targetNodeType['images'][0]['imageName']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
-             if targetHostName != currentNodeName
-               # Update the currentHostName ~/.ssh/known_hosts with fingerprint for targetHostName
-               # After call to host_config_linux
-               machine.vm.provision  "shell" do |bash_shell|
-                 if currentOsFamily == 'linux'
-                   # Call ssh known_hosts configuration function for linux (declared above)
-                   bash_shell.inline = $ssh_fingerprint_config_linux
-                 end
-                 bash_shell.args = "'#{debug}' #{clusterDetails['localLogin']} #{targetHostName}"
-               end
+            targetHostName = "#{targetNodeType['images'][1]['imageName']}-#{targetNodeType['addrStart'] + targetNodeIndex}"
+            # Update the currentHostName ~/.ssh/known_hosts with fingerprint for targetHostName
+            # Must be after call to host_config_linux
+            machine.vm.provision  "shell" do |bash_shell|
+              if currentOsFamily == 'linux'
+                # Call ssh known_hosts configuration function for linux (declared above)
+                bash_shell.inline = $ssh_fingerprint_config_linux
+              end
+              bash_shell.args = "'#{debug}' #{clusterDetails['localLogin']} #{targetHostName}"
             end
           end
         end
@@ -516,9 +516,17 @@ end
 
 # Called from project ../../Vagrantfile
 # Create a VM for each node declared by clusterDetails.nodeGroups (normally just a provisioner and an appliance )
-def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagrantCommand='default')
-  vault_password   = File.read( ENV['HOME'] + "/.vault_password_file")
-  ansible_password = File.read( ENV['HOME'] + "/.ansible_password_file")
+# Parameters:
+#     clusterDetails: Structure loaded from environment/${env_name}/environment.json
+#     debug: Level of debug used by provisioners
+#     env_name: The name of the environment to load from environment/${env_name}
+#     vagrantCommand: ARGV[0] is used to squash output when running the 'vagrant ssh-config' command
+#     rebuild: start from base image to test full build.
+def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagrantCommand='default', rebuild=false)
+  # Vault password encrypts/decrypts the file vault/credentials.yml
+  vault_password   = File.read( ENV['HOME'] + "/.vault_password_file"){|f| f.readline}
+  # Password for localUser declared in clusterDetails
+  ansible_password = File.read( ENV['HOME'] + "/.ansible_password_file"){|f| f.readline}
   
   # Get a list of Vagrant boxes that are available in local cache
   vagrantBoxList = `vagrant box list`
@@ -539,7 +547,7 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
     clusterDetails['nodeGroups'].each do |nodeGroup|
       (0..nodeGroup['nodeCount']-1).each do |nodeIndex|
         currentNodeIndex= nodeGroup['addrStart'] + nodeIndex
-        currentNodeName = "#{nodeGroup['images'][0]['imageName']}-#{currentNodeIndex}"
+        currentNodeName = "#{nodeGroup['images'][1]['imageName']}-#{currentNodeIndex}"
         if nodeGroup['hostnameArray'] and ((nodeGroup['hostnameArray']).length == nodeGroup['nodeCount'])
           currentNodeName = "#{nodeGroup['hostnameArray'][nodeIndex]}"
         end
@@ -555,7 +563,8 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
           vagrantImageName = vagrantImage['imageName']
           vagrantImageVersion = vagrantImage['imageVersion']
           vagrantBoxRegexp = "^#{vagrantImageName}[ ]+\\(#{vagrantProvider}, #{vagrantImageVersion}\\)"
-          if vagrantBoxList.match?(/#{vagrantBoxRegexp}/)
+          # if rebuild, loop to the last image
+          if ( ! rebuild ) && vagrantBoxList.match?(/#{vagrantBoxRegexp}/)
             foundMatch = true
             break
           end
