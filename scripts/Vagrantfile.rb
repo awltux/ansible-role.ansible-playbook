@@ -585,7 +585,7 @@ def createCluster(clusterDetails, debug=0, env_name='vagrant-virtualbox', vagran
           
           # Fix for building VirtualBox Guest Additions for CentOS8
           # FIXME: This will probably be fixed someday and this line removed
-          machine.vbguest.installer = Centos8VbGuestInstaller
+          #machine.vbguest.installer = Centos8VbGuestInstaller
 
           machine.vm.hostname = currentNodeName
           # eth1: Create a nic to talk to other VMs
