@@ -139,7 +139,7 @@ pro_image_name      := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisi
 pro_image_version   := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .images[1].imageVersion?' $(environments_file) | sed 's/\"//g' )
 #pro_build_version := $(shell jq '.nodeGroups[] | select(.nodeGroup == "provisioner") | .buildVersion?' $(environments_file) | sed 's/\"//g' )
 # APPLIANCE CONFIG
-app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[1].imageName??' $(environments_file) | sed 's/\"//g' )
+app_hostname_base    := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .images[1].imageName?' $(environments_file) | sed 's/\"//g' )
 app_addr_start       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .addrStart?'    $(environments_file) | sed 's/\"//g' )
 app_node_count       := $(shell jq '.nodeGroups[] | select(.nodeGroup == "appliance") | .nodeCount?'    $(environments_file) | sed 's/\"//g' )
 app_hostname        := $(app_hostname_base)-$(app_addr_start)
