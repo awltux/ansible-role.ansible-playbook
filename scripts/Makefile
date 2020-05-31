@@ -463,6 +463,7 @@ linux-bootstrap:
 .PHONY: linux-provisioner
 linux-provisioner: linux-bootstrap
 	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for provisioner: $${USER}" && \
+	mkdir -p $(log_dir) && \
 	export ANSIBLE_FORCE_COLOR=true && \
 	ansible-playbook $(ansible_debug) \
 	--inventory $(inventory_file) \
@@ -476,6 +477,7 @@ linux-provisioner: linux-bootstrap
 .PHONY: linux-appliance
 linux-appliance:
 	$(quiet)( echo "[Makefile.$@] Apply ansible playbook for appliance " && \
+	mkdir -p $(log_dir) && \
 	export ANSIBLE_FORCE_COLOR=true && \
 	ansible-playbook $(ansible_debug) \
 	--inventory $(inventory_file) \
